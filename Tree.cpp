@@ -228,14 +228,7 @@ class AVLtree {
   std::map<node *, int> heightb; // measures height balance factor
 
 public:
-  AVLtree() {
-    tree = nullptr;
-    this->insertion(1);
-    this->insertion(2);
-    this->insertion(3);
-
-    printTree();
-  }
+  AVLtree() { tree = nullptr; }
   std::pair<node *, node *> search(int k, node *tree,
                                    node *current_ptr = nullptr,
                                    node *parent_ptr = nullptr) {
@@ -244,7 +237,7 @@ public:
 
     if (tree->key == k)
       return {current_ptr, parent_ptr};
-    else if ((*tree).key >= k)
+    else if ((*tree).key > k)
       return search(k, tree->left, tree->left, tree);
     else
       return search(k, tree->right, tree->right, tree);
@@ -265,41 +258,57 @@ public:
   node *right_rotate(node *f, node *s) {
     f->left = s->right;
     s->right = f;
+    if (heightb[s] == 0) {
+      heightb[s] = 1;
+      heightb[f] = -1;
+    } else {
+      heightb[s] = 0;
+      heightb[f] = 0;
+    }
     return s;
   }
-  node left_right_rotate(node *f, node *s) {
+  node *left_right_rotate(node *f, node *s) {
     // right_rotate in node* s
-
-    node G = *s->left;
-    s->left = G.right;
-    G.right = s;
-    f->right = &G;
-
-    node G2 = *f->right;
-    f->right = G.left;
-    G.left = f;
-
+    auto Y = heightb[s->left];
+    auto G = right_rotate(s, s->left);
+    f->right = G;
+    auto G2 = left_rotate(f, G);
+    if (Y == 0) {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = 0;
+    } else if (Y < 0) {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = 1;
+    } else {
+      heightb[G2->right] = -1;
+      heightb[G2->left] = 0;
+    }
     return G2;
   }
 
-  node right_left_rotate(node *f, node *s) {
+  node *right_left_rotate(node *f, node *s) {
     // left_rotate in node* s
-
-    node G = *s->right;
-    s->right = G.left;
-    G.left = s;
-    f->left = &G;
-
-    node G2 = *f->left;
-    f->left = G.right;
-    G.right = f;
-
+    auto Y = heightb[s->right];
+    auto G = left_rotate(s, s->right);
+    f->left = G;
+    auto G2 = right_rotate(f, G);
+    if (Y == 0) {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = 0;
+    } else if (Y < 0) {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = 1;
+    } else {
+      heightb[G2->right] = -1;
+      heightb[G2->left] = 0;
+    }
     return G2;
   }
 
   void insertion(int k) {
     auto pos = search(k, tree);
-    node *N = new node();
+
+    // empty root
     if (pos.second == nullptr) {
 
       node *temp = new node();
@@ -314,50 +323,61 @@ public:
     std::cout << pos.second->key << std::endl;
     if (pos.second->key < k) {
       pos.second->right = new_incoming;
-      std::cout << "r" << std::endl;
     } else {
       pos.second->left = new_incoming;
     }
     heightb[new_incoming] = 0;
     this->printTree();
+    // we iterate over the parents to fix unbalance
+    auto Z = new_incoming;
     for (auto X = pos.second; X != nullptr;) {
-      auto pos2 = search(X->key, tree);
       node *G = new node();
-      if (X->right->key == pos2.first->key) {
+      node *N = new node();
+      auto pos3 = search(X->key, tree);
+      if (X->right && X->right->key == Z->key) {
         if (heightb[X] > 0) {
-          G = pos2.second;
-          std::cout << "rotating" << std::endl;
-          if (heightb[pos2.first] >= 0) {
-            N = left_rotate(X, pos2.first);
+          G = pos3.second;
+          std::cout << "> case" << std::endl;
+          if (heightb[Z] >= 0) {
+            N = left_rotate(X, Z);
           } else {
-            *N = left_right_rotate(X, pos2.first);
+            N = left_right_rotate(X, Z);
           }
         } else {
 
           if (heightb[X] < 0) {
+            std::cout << "<0 case" << std::endl;
             heightb[X] = 0;
             break;
           }
+          std::cout << "0 case" << std::endl;
 
           heightb[X] = 1;
-          X = pos2.second;
+          // next parent updation for X,Z;
+          Z = X;
+          X = pos3.second;
           continue;
         }
-      } else if (X->left->key == pos2.first->key) {
+      } else if (X->left && X->left->key == Z->key) {
         if (heightb[X] < 0) {
-          G = pos2.second;
-          if (heightb[pos2.first] <= 0) {
-            N = right_rotate(X, pos2.first);
+          G = pos3.second;
+          std::cout << "<0 case -- l" << std::endl;
+          if (heightb[Z] <= 0) {
+            N = right_rotate(X, Z);
           } else {
-            *N = right_left_rotate(X, pos2.first);
+            N = right_left_rotate(X, Z);
           }
         } else {
           if (heightb[X] > 0) {
+            std::cout << ">0 case -- l" << std::endl;
             heightb[X] = 0;
             break;
           }
           heightb[X] = -1;
-          X = pos2.second;
+          // next parent updation for X,Z;
+          std::cout << "0 case -- l" << std::endl;
+          Z = X;
+          X = pos3.second;
           continue;
         }
       }
@@ -376,7 +396,13 @@ public:
   };
   // insertion like normally how BST works , but requires self
   // balancing using 4 cases we generally see should be used
-  void deletion();
+  void deletion(int k) {
+
+    // noraml BST delete
+
+       
+    // Self balancing occurs now
+  };
   void join(); // join , split , union_AVL are methods which help with
                // parallelization of bulk operations which something we need
                // for storage engines in general
@@ -388,7 +414,7 @@ public:
     auto temp_tree = tree;
     dq.push_back(temp_tree);
     int depth = 0;
-    while (!dq.empty() && depth < 7) {
+    while (!dq.empty() && depth < 3) {
       std::cout << " --- depth:" << depth << " ---" << std::endl;
 
       int len_curr_dq = dq.size();
@@ -458,6 +484,48 @@ int main() {
   // std::cout << "\nTest 5: Removing 999 (Doesn't exist)" << std::endl;
   // bst->removal_node(999);
   // Result: Should print "Element does not exit"
-  auto AVl = new AVLtree();
+
+  // -------------------------------------
+
+  // Case 1: Right-Right (Single Left Rotation)
+  // Insertion order: 1, 2, 3
+  // Expected: 2 is root, 1 is left, 3 is right
+  std::cout << "Test 1: Right-Right Case" << std::endl;
+  AVLtree t1;
+  t1.insertion(1);
+  t1.insertion(2);
+  t1.insertion(3);
+  t1.printTree();
+
+  // Case 2: Left-Left (Single Right Rotation)
+  // Insertion order: 3, 2, 1
+  std::cout << "\nTest 2: Left-Left Case" << std::endl;
+  AVLtree t2;
+  t2.insertion(3);
+  t2.insertion(2);
+  t2.insertion(1);
+  t2.printTree();
+
+  // Case 3: Left-Right (Double Rotation)
+  // Insertion order: 3, 1, 2
+  // 1. Insert 3, then 1 (Left heavy)
+  // 2. Insert 2 (Right child of 1) -> Triggers Left-Right
+  std::cout << "\nTest 3: Left-Right Case" << std::endl;
+  AVLtree t3;
+  t3.insertion(3);
+  t3.insertion(1);
+  t3.insertion(2);
+  t3.printTree();
+
+  // Case 4: Right-Left (Double Rotation)
+  // Insertion order: 1, 3, 2
+  std::cout << "\nTest 4: Right-Left Case" << std::endl;
+  AVLtree t4;
+  t4.insertion(1);
+  t4.insertion(3);
+  t4.insertion(2);
+  t4.printTree();
+
+  // -----------------------------------------
   return 0;
 }
