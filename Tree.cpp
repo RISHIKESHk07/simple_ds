@@ -211,74 +211,120 @@ public:
   };
 };
 
+#include <algorithm>
+#include <cassert>
+#include <climits>
+#include <deque>
+#include <iostream>
+#include <map>
+#include <random>
+#include <string>
+#include <vector>
+
 class AVLtree {
+
   /*
-    Here we are working towards self balancing trees where we self balnce trees
-    in order to armortize our search,insertion,deletion to log(N) , from the
-    original paper we are using the golden ration and fibonacci numbers in
-    showing what is the limit of nodes per depth
+    AVL TREE
+    --------
+    Self balancing BST where:
+      BF = height(right) - height(left)
+
+    Valid BF:
+      -1, 0, +1
+
+    Rotations:
+      LL -> right rotate
+      RR -> left rotate
+      LR -> left-right rotate
+      RL -> right-left rotate
   */
+
   typedef struct node {
     int key;
     node *left;
     node *right;
   } node;
 
+public:
   node *tree;
-  std::map<node *, int> heightb; // measures height balance factor
+
+private:
+  std::map<node *, int> heightb;
 
 public:
   AVLtree() { tree = nullptr; }
+
+  // ============================================================
+  // SEARCH
+  // ============================================================
+
   std::pair<node *, node *> search_internal(int k, node *tree,
-                                   node *current_ptr = nullptr,
-                                   node *parent_ptr = nullptr) {
+                                            node *current_ptr = nullptr,
+                                            node *parent_ptr = nullptr) {
+
     if (tree == nullptr)
       return {current_ptr, parent_ptr};
 
     if (tree->key == k)
       return {current_ptr, parent_ptr};
-    else if ((*tree).key > k)
+
+    else if (tree->key > k)
       return search_internal(k, tree->left, tree->left, tree);
+
     else
       return search_internal(k, tree->right, tree->right, tree);
-  }; 
+  }
 
-  std::pair<node *, node *> search(int k , node* tree_acc) {
+  std::pair<node *, node *> search(int k, node *tree_acc) {
     return search_internal(k, tree_acc, tree, nullptr);
   }
 
-  // search through like BST ..
+  // ============================================================
+  // ROTATIONS
+  // ============================================================
 
   node *left_rotate(node *f, node *s) {
+
     f->right = s->left;
     s->left = f;
+
     if (heightb[s] == 0) {
       heightb[f] = 1;
       heightb[s] = -1;
     } else {
-      heightb[s] = 0;
       heightb[f] = 0;
+      heightb[s] = 0;
     }
+
     return s;
   }
+
   node *right_rotate(node *f, node *s) {
+
     f->left = s->right;
     s->right = f;
+
     if (heightb[s] == 0) {
-      heightb[s] = 1;
       heightb[f] = -1;
+      heightb[s] = 1;
     } else {
-      heightb[s] = 0;
       heightb[f] = 0;
+      heightb[s] = 0;
     }
+
     return s;
   }
+
   node *left_right_rotate(node *f, node *s) {
-    // right_rotate in node* s
+
     auto Y = heightb[s->left];
+
     auto G = right_rotate(s, s->left);
+
     f->right = G;
+
     auto G2 = left_rotate(f, G);
+
     if (Y == 0) {
       heightb[G2->right] = 0;
       heightb[G2->left] = 0;
@@ -289,15 +335,20 @@ public:
       heightb[G2->right] = -1;
       heightb[G2->left] = 0;
     }
+
     return G2;
   }
 
   node *right_left_rotate(node *f, node *s) {
-    // left_rotate in node* s
+
     auto Y = heightb[s->right];
+
     auto G = left_rotate(s, s->right);
+
     f->left = G;
+
     auto G2 = right_rotate(f, G);
+
     if (Y == 0) {
       heightb[G2->right] = 0;
       heightb[G2->left] = 0;
@@ -308,396 +359,626 @@ public:
       heightb[G2->right] = -1;
       heightb[G2->left] = 0;
     }
+
     return G2;
   }
 
+  // ============================================================
+  // INSERTION
+  // ============================================================
+
   void insertion(int k) {
+
     auto pos = search(k, tree);
 
-    // empty root
+    // EMPTY TREE
+
     if (pos.second == nullptr) {
 
       node *temp = new node();
+
       temp->key = k;
+      temp->left = nullptr;
+      temp->right = nullptr;
+
       tree = temp;
+
       heightb[temp] = 0;
+
       return;
     }
-    // add the node height here ... and node as well
+
     node *new_incoming = new node();
+
     new_incoming->key = k;
-    std::cout << pos.second->key << std::endl;
-    if (pos.second->key < k) {
+    new_incoming->left = nullptr;
+    new_incoming->right = nullptr;
+
+    if (pos.second->key < k)
       pos.second->right = new_incoming;
-    } else {
+    else
       pos.second->left = new_incoming;
-    }
+
     heightb[new_incoming] = 0;
-    this->printTree();
-    // we iterate over the parents to fix unbalance
+
     auto Z = new_incoming;
+
     for (auto X = pos.second; X != nullptr;) {
-      node *G = new node();
-      node *N = new node();
+
       auto pos3 = search(X->key, tree);
+
+      node *G = nullptr;
+      node *N = nullptr;
+
+      // RIGHT SIDE INSERTION
+
       if (X->right && X->right->key == Z->key) {
+
         if (heightb[X] > 0) {
+
           G = pos3.second;
-          std::cout << "> case" << std::endl;
-          if (heightb[Z] >= 0) {
+
+          if (heightb[Z] >= 0)
             N = left_rotate(X, Z);
-          } else {
+          else
             N = left_right_rotate(X, Z);
-          }
+
         } else {
 
           if (heightb[X] < 0) {
-            std::cout << "<0 case" << std::endl;
             heightb[X] = 0;
             break;
           }
-          std::cout << "0 case" << std::endl;
 
           heightb[X] = 1;
-          // next parent updation for X,Z;
+
           Z = X;
           X = pos3.second;
-          continue;
-        }
-      } else if (X->left && X->left->key == Z->key) {
-        if (heightb[X] < 0) {
-          G = pos3.second;
-          std::cout << "<0 case -- l" << std::endl;
-          if (heightb[Z] <= 0) {
-            N = right_rotate(X, Z);
-          } else {
-            N = right_left_rotate(X, Z);
-          }
-        } else {
-          if (heightb[X] > 0) {
-            std::cout << ">0 case -- l" << std::endl;
-            heightb[X] = 0;
-            break;
-          }
-          heightb[X] = -1;
-          // next parent updation for X,Z;
-          std::cout << "0 case -- l" << std::endl;
-          Z = X;
-          X = pos3.second;
+
           continue;
         }
       }
 
-      // attach the displaced node over here ...
-      std::cout << "Attaching" << std::endl;
+      // LEFT SIDE INSERTION
+
+      else if (X->left && X->left->key == Z->key) {
+
+        if (heightb[X] < 0) {
+
+          G = pos3.second;
+
+          if (heightb[Z] <= 0)
+            N = right_rotate(X, Z);
+          else
+            N = right_left_rotate(X, Z);
+
+        } else {
+
+          if (heightb[X] > 0) {
+            heightb[X] = 0;
+            break;
+          }
+
+          heightb[X] = -1;
+
+          Z = X;
+          X = pos3.second;
+
+          continue;
+        }
+      }
+
+      // ATTACH BACK
+
       if (G == nullptr)
         tree = N;
+
       else if (G->key < N->key)
         G->right = N;
+
       else
         G->left = N;
 
       break;
     }
-  };
-  // insertion like normally how BST works , but requires self
-  // balancing using 4 cases we generally see should be used
+  }
+
+  // ============================================================
+  // BST SUCCESSOR
+  // ============================================================
 
   node *bst_succesor(node *x) {
+
     if (x->right != nullptr) {
+
       auto y = x->right;
-      while (y->left != nullptr) {
+
+      while (y->left != nullptr)
         y = y->left;
-      }
+
       return y;
     }
+
     auto x_pos = search(x->key, tree);
+
     auto y2 = x_pos.second;
     auto x2 = x_pos.first;
+
     while (y2 != nullptr && x2 == y2->right) {
+
       x2 = y2;
+
       auto y2_pos = search(y2->key, tree);
+
       y2 = y2_pos.second;
     }
+
     return y2;
   }
 
+  // ============================================================
+  // SHIFT NODES
+  // ============================================================
+
   node *shift_nodes(node *u, node *v) {
+
     auto u_pos = search(u->key, tree);
+
     if (u_pos.second == nullptr) {
-      v->left = tree->left;
-      v->right = tree->right;
+
+      if (v != nullptr) {
+        v->left = tree->left;
+        v->right = tree->right;
+      }
+
       tree = v;
+
     } else if (u_pos.second->left == u_pos.first) {
+
       u_pos.second->left = v;
+
     } else if (u_pos.second->right == u_pos.first) {
+
       u_pos.second->right = v;
     }
+
     return u_pos.second;
   }
 
+  // ============================================================
+  // BST DELETE
+  // ============================================================
+
   node *bst_delete(int k) {
+
     auto u_pos = search(k, tree);
+
+    if (u_pos.first == nullptr)
+      return nullptr;
+
     if (u_pos.first->left == nullptr) {
+
       return shift_nodes(u_pos.first, u_pos.first->right);
 
     } else if (u_pos.first->right == nullptr) {
+
       return shift_nodes(u_pos.first, u_pos.first->left);
+
     } else {
+
       auto y = bst_succesor(u_pos.first);
+
       auto y_pos = search(y->key, tree);
-      if (y_pos.second != u_pos.first) {
+
+      if (y_pos.second != u_pos.first)
         y->right = u_pos.first->right;
-      }
+
       shift_nodes(u_pos.first, y);
+
       y->left = u_pos.first->left;
+
       return y_pos.second;
     }
   }
 
+  // ============================================================
+  // DELETE
+  // ============================================================
+
   void deletion(int k) {
 
-    // noraml BST delete
     auto new_pos_on_del = bst_delete(k);
-    std::cout << "Deleted from the tree" << new_pos_on_del->key <<  std::endl;
-    printTree();
-    // Self balancing occurs now
+
+    if (new_pos_on_del == nullptr)
+      return;
+
     auto pos_del = search(new_pos_on_del->key, tree);
-    std::cout << "pos found from the tree" << pos_del.first->key << std::endl;
-    auto Z = pos_del.first;
+    node* N = new_pos_on_del;
     for (auto X = pos_del.second; X != nullptr;) {
+
       auto pos3 = search(X->key, tree);
-      node *G = new node();
-      node *N = new node();
-      if (X->left == new_pos_on_del) {
+      auto pos4 = search(N->key,tree);
+      node *G = nullptr;
+      int b;
+
+      // LEFT SIDE DELETE
+
+      if (X->left == N) {
+
         if (heightb[X] > 0) {
-          std::cout << "--l >0" << std::endl;
+
           G = pos3.second;
-          if (heightb[Z] < 0) {
-            N = left_right_rotate(X, Z);
-          } else {
-            N = right_rotate(X, Z);
-          }
+          b = heightb[X->right]; 
+          if (heightb[X->right] < 0 )
+            N = left_right_rotate(X, X->right);
+          else
+            N = left_rotate(X, X->right);
+
         } else {
-          if (heightb[X] < 0) {
-            std::cout << "--l <0" << std::endl;
-            heightb[X] = 0;
+
+          if (heightb[X] == 0) {
+            heightb[X] = 1;
             break;
           }
-          std::cout << "--l =0" << std::endl;
-          heightb[X] = -1;
-          Z = X;
-          X = pos3.second;
-          continue;
-        }
 
-      } else if (X->right == new_pos_on_del) {
+          heightb[X] = 0;
 
-        if (heightb[X] < 0) {
-          G = pos3.second;
-          std::cout << "--r <0" << std::endl;
-          if (heightb[Z] < 0) {
-            N = left_right_rotate(X, Z);
-          } else {
-            N = right_rotate(X, Z);
-          }
-        } else {
-          if (heightb[X] > 0) {
-            std::cout << "--r >0" << std::endl;
-            heightb[X] = 0;
-            break;
-          }
-          std::cout << "--r =0" << std::endl;
-          heightb[X] = -1;
-          Z = X;
-          X = pos3.second;
+          N = X; 
+          X = pos4.second;
+
           continue;
         }
       }
 
-      if (G == nullptr) {
+      // RIGHT SIDE DELETE
+
+      else if (X->right == N) {
+
+        if (heightb[X] < 0) {
+
+          G = pos3.second;
+          b = heightb[X->left];
+          if (heightb[X->left] <= 0)
+            N = right_left_rotate(X, X->left);
+          else
+            N = right_rotate(X, X->left);
+
+        } else {
+
+          if (heightb[X] == 0) {
+            heightb[X] = -1;
+            break;
+          }
+
+          heightb[X] = 0;
+
+          N = X;
+          X = pos4.second;
+
+          continue;
+        }
+      }
+
+      // ATTACH
+
+      if (G == nullptr)
         tree = N;
-      } else if (G->key >= N->key)
+
+      else if (G->key >= N->key)
         G->left = N;
+
       else
         G->right = N;
 
-      break;
+      if(b==0) break;
     }
-  };
-  void join(); // join , split , union_AVL are methods which help with
-               // parallelization of bulk operations which something we need
-               // for storage engines in general
-  void split();
-  void union_AVL();
+  }
 
-  void printTree() {
-    std::deque<node *> dq;
-    auto temp_tree = tree;
-    dq.push_back(temp_tree);
-    int depth = 0;
-    while (!dq.empty() && depth < 3) {
-      std::cout << " ------- depth:" << depth << " ------" << std::endl;
+  // ============================================================
+  // TREE PRINTER
+  // ============================================================
 
-      int len_curr_dq = dq.size();
-      std::cout << dq.size() << std::endl;
-      for (int i = 0; i < len_curr_dq; i++) {
-        auto curr = dq.front();
-        dq.pop_front();
-        if (curr->key > 0) {
-          std::cout << "key:" << curr->key << "--" << heightb[curr];
-        }
-        if (curr->left != nullptr)
-          dq.push_back((curr->left));
-        else {
-          // node *null_node = new node();
-          // dq.push_back(*null_node);
-        }
-        if (curr->right != nullptr)
-          dq.push_back(curr->right);
-        else {
-          // node *null_node = new node();
-          // dq.push_back(*null_node);
-        }
-      }
+private:
+  void printTreeInternal(node *root, std::string indent, bool last) {
 
-      std::cout << std::endl;
-      depth++;
-      std::cout << "-------" << std::endl;
+    if (root == nullptr) {
+
+      std::cout << indent;
+
+      if (last)
+        std::cout << "└── ";
+      else
+        std::cout << "├── ";
+
+      std::cout << "NULL" << std::endl;
+
+      return;
     }
-  };
-};
 
-class Tester {
-  enum test_type { BST, AVL };
-  test_type tt;
+    std::cout << indent;
+
+    if (last) {
+      std::cout << "└── ";
+      indent += "    ";
+    } else {
+      std::cout << "├── ";
+      indent += "│   ";
+    }
+
+    std::cout << root->key << " [BF=" << heightb[root] << "]" << std::endl;
+
+    printTreeInternal(root->left, indent, false);
+    printTreeInternal(root->right, indent, true);
+  }
 
 public:
-  Tester() { std::cout << "Starting Tester" << std::endl; }
-  void testPropagation() {
-    AVLtree avl;
-    // Create a deep tree
-    for (int i = 1; i <= 15; i++)
-      avl.insertion(i);
+  void printTree() {
 
-    // Delete nodes from the left to force right-heavy imbalances
-    // that propagate upwards.
-    std::cout << "\nTesting Propagation (Deleting 1, 2, 3):" << std::endl;
-    avl.deletion(1);
-    avl.deletion(2);
-    avl.deletion(3);
-    avl.printTree();
-  }
-  void testDeletion() {
-    AVLtree avl;
-    // Build a balanced tree first: 10, 20, 30, 5, 25, 40
-    int nodes[] = {20, 10, 30, 5, 15, 25, 40};
-    for (int n : nodes)
-      avl.insertion(n);
+    std::cout << "\n========== AVL TREE ==========\n";
 
-    // Case 1: Delete a leaf (no rotation needed)
-    // Delete 5 -> Height of 10's left subtree changes, BF(10) should change
-    std::cout << "\nDeleting Leaf 5:" << std::endl;
-    avl.deletion(5);
-    avl.printTree();
+    if (tree == nullptr) {
+      std::cout << "EMPTY TREE\n";
+      return;
+    }
 
-    // Case 2: Delete a node with one child
-    // Delete 10 (which now only has 15) -> 15 should shift up
-    std::cout << "\nDeleting Node with one child 10:" << std::endl;
-    avl.deletion(10);
-    avl.printTree();
+    printTreeInternal(tree, "", true);
 
-    // Case 3: The "R0" Deletion (Your initial question!)
-    // Delete from a subtree such that parent BF becomes 2 and child BF is 0
-    // This requires a specific setup:
-    //        10(BF:1)
-    //       /  \
-    //    5(BF:0) 15 (delete 15)
-    //    / \
-    //   2   7
-    AVLtree r0_tree;
-    r0_tree.insertion(10);
-    r0_tree.insertion(5);
-    r0_tree.insertion(15);
-    r0_tree.insertion(2);
-    r0_tree.insertion(7);
-    std::cout << "\nTesting R0 Deletion (Delete 15):" << std::endl;
-    r0_tree.deletion(15);
-    r0_tree.printTree();
+    std::cout << "==============================\n";
   }
 
-  void testInsertion() {
-    AVLtree avl;
+  // ============================================================
+  // AVL VALIDATION
+  // ============================================================
 
-    // Case 1: Right-Right (Single Left Rotation)
-    // Order: 10, 20, 30 -> Root should be 20
-    avl.insertion(10);
-    avl.insertion(20);
-    avl.insertion(30);
-    std::cout << "After RR Insertion (10,20,30):" << std::endl;
-    avl.printTree();
+private:
+  int realHeight(node *root) {
 
-    // Case 2: Left-Left (Single Right Rotation)
-    // Order: 5, 4 -> Root 20 remains, but 10, 5, 4 should rebalance 10,5,4 to
-    // root 5
-    avl.insertion(5);
-    avl.insertion(4);
-    std::cout << "After LL Insertion (5,4):" << std::endl;
-    avl.printTree();
+    if (root == nullptr)
+      return 0;
 
-    // Case 3: Right-Left (Double Rotation)
-    // Insertion of 25 into current tree
-    avl.insertion(25);
-    std::cout << "After RL Insertion (25):" << std::endl;
-    avl.printTree();
+    return 1 + std::max(realHeight(root->left), realHeight(root->right));
   }
-  void testInsertions2() {
-    // Case 1: Right-Right (Single Left Rotation)
-    // Insertion order: 1, 2, 3
-    //  Expected: 2 is root, 1 is left, 3 is right
-    std::cout << "Test 1: Right-Right Case" << std::endl;
-    AVLtree t1;
-    t1.insertion(1);
-    t1.insertion(2);
-    t1.insertion(3);
-    t1.printTree();
 
-    // Case 2: Left-Left (Single Right Rotation)
-    // Insertion order: 3, 2, 1
-    std::cout << "\nTest 2: Left-Left Case" << std::endl;
-    AVLtree t2;
-    t2.insertion(3);
-    t2.insertion(2);
-    t2.insertion(1);
-    t2.printTree();
+  bool validateBST(node *root, int minv, int maxv) {
 
-    // Case 3: Left-Right (Double Rotation)
-    // Insertion order: 3, 1, 2
-    // 1. Insert 3, then 1 (Left heavy)
-    // 2. Insert 2 (Right child of 1) -> Triggers Left-Right
-    std::cout << "\nTest 3: Left-Right Case" << std::endl;
-    AVLtree t3;
-    t3.insertion(3);
-    t3.insertion(1);
-    t3.insertion(2);
-    t3.printTree();
+    if (root == nullptr)
+      return true;
 
-    // Case 4: Right-Left (Double Rotation)
-    // Insertion order: 1, 3, 2
-    std::cout << "\nTest 4: Right-Left Case" << std::endl;
-    AVLtree t4;
-    t4.insertion(1);
-    t4.insertion(3);
-    t4.insertion(2);
-    t4.printTree();
+    if (root->key <= minv || root->key >= maxv)
+      return false;
+
+    return validateBST(root->left, minv, root->key) &&
+           validateBST(root->right, root->key, maxv);
   }
-  void Avl_tests() {
-    testInsertion();
-    testDeletion();
-    testPropagation();
+
+  bool validateAVL(node *root) {
+
+    if (root == nullptr)
+      return true;
+
+    int lh = realHeight(root->left);
+    int rh = realHeight(root->right);
+
+    int bf = rh - lh;
+
+    if (std::abs(bf) > 1) {
+
+      std::cout << "AVL VIOLATION at node " << root->key << " BF=" << bf
+                << std::endl;
+
+      return false;
+    }
+
+    if (heightb[root] != bf) {
+
+      std::cout << "BALANCE FACTOR WRONG at node " << root->key
+                << " expected=" << bf << " stored=" << heightb[root]
+                << std::endl;
+
+      return false;
+    }
+
+    return validateAVL(root->left) && validateAVL(root->right);
+  }
+
+public:
+  void assertCorrect() {
+
+    assert(validateBST(tree, INT_MIN, INT_MAX));
+    assert(validateAVL(tree));
+
+    std::cout << "AVL VALIDATION PASSED\n";
   }
 };
 
+// ============================================================
+// TESTER
+// ============================================================
+
+class Tester {
+
+public:
+  Tester() { std::cout << "Starting AVL Tests\n"; }
+
+  // ============================================================
+  // RR ROTATION
+  // ============================================================
+
+  void testRR() {
+
+    std::cout << "\n===== RR TEST =====\n";
+
+    AVLtree t;
+
+    t.insertion(1);
+    t.assertCorrect();
+
+    t.insertion(2);
+    t.assertCorrect();
+
+    t.insertion(3);
+    t.assertCorrect();
+
+    t.printTree();
+
+    auto root = t.tree;
+
+    assert(root->key == 2);
+    assert(root->left->key == 1);
+    assert(root->right->key == 3);
+
+    std::cout << "RR TEST PASSED\n";
+  }
+
+  // ============================================================
+  // LL ROTATION
+  // ============================================================
+
+  void testLL() {
+
+    std::cout << "\n===== LL TEST =====\n";
+
+    AVLtree t;
+
+    t.insertion(3);
+    t.assertCorrect();
+
+    t.insertion(2);
+    t.assertCorrect();
+
+    t.insertion(1);
+    t.assertCorrect();
+
+    t.printTree();
+
+    auto root = t.tree;
+
+    assert(root->key == 2);
+    assert(root->left->key == 1);
+    assert(root->right->key == 3);
+
+    std::cout << "LL TEST PASSED\n";
+  }
+
+  // ============================================================
+  // LR ROTATION
+  // ============================================================
+
+  void testLR() {
+
+    std::cout << "\n===== LR TEST =====\n";
+
+    AVLtree t;
+
+    t.insertion(3);
+    t.assertCorrect();
+
+    t.insertion(1);
+    t.assertCorrect();
+
+    t.insertion(2);
+    t.assertCorrect();
+
+    t.printTree();
+
+    auto root = t.tree;
+
+    assert(root->key == 2);
+    assert(root->left->key == 1);
+    assert(root->right->key == 3);
+
+    std::cout << "LR TEST PASSED\n";
+  }
+
+  // ============================================================
+  // RL ROTATION
+  // ============================================================
+
+  void testRL() {
+
+    std::cout << "\n===== RL TEST =====\n";
+
+    AVLtree t;
+
+    t.insertion(1);
+    t.assertCorrect();
+
+    t.insertion(3);
+    t.assertCorrect();
+
+    t.insertion(2);
+    t.assertCorrect();
+
+    t.printTree();
+
+    auto root = t.tree;
+
+    assert(root->key == 2);
+    assert(root->left->key == 1);
+    assert(root->right->key == 3);
+
+    std::cout << "RL TEST PASSED\n";
+  }
+
+  // ============================================================
+  // RANDOMIZED STRESS TEST
+  // ============================================================
+
+  void randomizedTest() {
+
+    std::cout << "\n===== RANDOMIZED TEST =====\n";
+
+    AVLtree t;
+
+    std::vector<int> vals;
+
+    for (int i = 1; i <= 1000; i++)
+      vals.push_back(i);
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+
+    std::shuffle(vals.begin(), vals.end(), g);
+
+    for (auto v : vals) {
+
+      t.insertion(v);
+
+      t.assertCorrect();
+    }
+
+    std::shuffle(vals.begin(), vals.end(), g);
+
+    for (auto v : vals) {
+
+      t.deletion(v);
+
+      t.assertCorrect();
+    }
+
+    std::cout << "RANDOMIZED TEST PASSED\n";
+  }
+
+  // ============================================================
+  // RUN ALL
+  // ============================================================
+
+  void runAllTests() {
+
+    testRR();
+    testLL();
+    testLR();
+    testRL();
+
+    randomizedTest();
+
+    std::cout << "\nALL TESTS PASSED\n";
+  }
+};
+
+// ============================================================
+// MAIN
+// ============================================================
 int main() {
   // ------------------------------------------------ //
   // BST ..
@@ -743,7 +1024,7 @@ int main() {
   // -------------------------------------
   // AVL trees ..
   auto t = new Tester();
-  t->Avl_tests();
+  t->runAllTests();
   // -----------------------------------------
   return 0;
 }
