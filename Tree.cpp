@@ -214,12 +214,7 @@ public:
 #include <algorithm>
 #include <cassert>
 #include <climits>
-#include <deque>
-#include <iostream>
-#include <map>
 #include <random>
-#include <string>
-#include <vector>
 
 class AVLtree {
 
@@ -323,18 +318,20 @@ public:
 
     f->right = G;
 
-    auto G2 = left_rotate(f, G);
+    auto G2 = left_rotate(f, f->right);
 
     if (Y == 0) {
       heightb[G2->right] = 0;
       heightb[G2->left] = 0;
     } else if (Y < 0) {
-      heightb[G2->right] = 0;
-      heightb[G2->left] = 1;
-    } else {
-      heightb[G2->right] = -1;
+      heightb[G2->right] = 1;
       heightb[G2->left] = 0;
+    } else {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = -1;
     }
+
+    heightb[G2] = 0;
 
     return G2;
   }
@@ -347,18 +344,20 @@ public:
 
     f->left = G;
 
-    auto G2 = right_rotate(f, G);
+    auto G2 = right_rotate(f, f->left);
 
     if (Y == 0) {
       heightb[G2->right] = 0;
       heightb[G2->left] = 0;
     } else if (Y < 0) {
-      heightb[G2->right] = 0;
-      heightb[G2->left] = 1;
-    } else {
-      heightb[G2->right] = -1;
+      heightb[G2->right] = 1;
       heightb[G2->left] = 0;
+    } else {
+      heightb[G2->right] = 0;
+      heightb[G2->left] = -1;
     }
+
+    heightb[G2] = 0;
 
     return G2;
   }
@@ -409,7 +408,8 @@ public:
 
       node *G = nullptr;
       node *N = nullptr;
-
+      bool was_left_child =
+          (pos3.second != nullptr && pos3.second->left == pos3.first);
       // RIGHT SIDE INSERTION
 
       if (X->right && X->right->key == Z->key) {
@@ -473,11 +473,11 @@ public:
       if (G == nullptr)
         tree = N;
 
-      else if (G->key < N->key)
-        G->right = N;
+      else if (was_left_child)
+        G->left = N;
 
       else
-        G->left = N;
+        G->right = N;
 
       break;
     }
@@ -520,16 +520,11 @@ public:
   // SHIFT NODES
   // ============================================================
 
-  node *shift_nodes(node *u, node *v) {
+  void shift_nodes(node *u, node *v) {
 
     auto u_pos = search(u->key, tree);
 
     if (u_pos.second == nullptr) {
-
-      if (v != nullptr) {
-        v->left = tree->left;
-        v->right = tree->right;
-      }
 
       tree = v;
 
@@ -541,43 +536,104 @@ public:
 
       u_pos.second->right = v;
     }
-
-    return u_pos.second;
   }
 
   // ============================================================
   // BST DELETE
   // ============================================================
 
-  node *bst_delete(int k) {
+  // returns:
+  // first  -> rebalance start node
+  // second -> subtree that became shorter
+  std::pair<node *, node *> bst_delete(int k) {
 
     auto u_pos = search(k, tree);
 
     if (u_pos.first == nullptr)
-      return nullptr;
+      return {nullptr, nullptr};
+
+    node *rebalance_start = nullptr;
+    node *shrunk_subtree = nullptr;
+
+    // --------------------------------------------------------
+    // CASE 1 : NO LEFT CHILD
+    // --------------------------------------------------------
 
     if (u_pos.first->left == nullptr) {
 
-      return shift_nodes(u_pos.first, u_pos.first->right);
+      rebalance_start = u_pos.second;
 
-    } else if (u_pos.first->right == nullptr) {
+      shrunk_subtree = (u_pos.second && u_pos.second->left == u_pos.first)
+                           ? u_pos.second->left
+                       : u_pos.second ? u_pos.second->right
+                                      : nullptr;
 
-      return shift_nodes(u_pos.first, u_pos.first->left);
+      shift_nodes(u_pos.first, u_pos.first->right);
 
-    } else {
+      return {rebalance_start, shrunk_subtree};
+    }
+
+    // --------------------------------------------------------
+    // CASE 2 : NO RIGHT CHILD
+    // --------------------------------------------------------
+
+    else if (u_pos.first->right == nullptr) {
+
+      rebalance_start = u_pos.second;
+
+      shrunk_subtree = (u_pos.second && u_pos.second->left == u_pos.first)
+                           ? u_pos.second->left
+                       : u_pos.second ? u_pos.second->right
+                                      : nullptr;
+
+      shift_nodes(u_pos.first, u_pos.first->left);
+
+      return {rebalance_start, shrunk_subtree};
+    }
+
+    // --------------------------------------------------------
+    // CASE 3 : TWO CHILDREN
+    // --------------------------------------------------------
+
+    else {
 
       auto y = bst_succesor(u_pos.first);
 
       auto y_pos = search(y->key, tree);
 
-      if (y_pos.second != u_pos.first)
+      // ----------------------------------------------------
+      // successor not direct child
+      // ----------------------------------------------------
+
+      if (y_pos.second != u_pos.first) {
+
+        // THIS is where subtree height first changes
+        rebalance_start = y_pos.second;
+
+        // successor removed from LEFT side of parent
+        shrunk_subtree = y_pos.second->left;
+
+        shift_nodes(y_pos.first, y_pos.first->right);
+
         y->right = u_pos.first->right;
+      }
+
+      // ----------------------------------------------------
+      // successor direct child
+      // ----------------------------------------------------
+
+      else {
+
+        rebalance_start = y;
+
+        shrunk_subtree = y->right;
+      }
 
       shift_nodes(u_pos.first, y);
 
       y->left = u_pos.first->left;
 
-      return y_pos.second;
+      return {rebalance_start, shrunk_subtree};
     }
   }
 
@@ -587,29 +643,38 @@ public:
 
   void deletion(int k) {
 
-    auto new_pos_on_del = bst_delete(k);
+    auto del_info = bst_delete(k);
 
-    if (new_pos_on_del == nullptr)
+    auto start = del_info.first;
+    auto N = del_info.second;
+
+    if (start == nullptr)
       return;
 
-    auto pos_del = search(new_pos_on_del->key, tree);
-    node* N = new_pos_on_del;
-    for (auto X = pos_del.second; X != nullptr;) {
+    for (auto X = start; X != nullptr;) {
 
       auto pos3 = search(X->key, tree);
-      auto pos4 = search(N->key,tree);
-      node *G = nullptr;
-      int b;
 
-      // LEFT SIDE DELETE
+      node *G = nullptr;
+
+      int b = 0;
+
+      bool was_left_child =
+          (pos3.second != nullptr && pos3.second->left == pos3.first);
+
+      // ====================================================
+      // LEFT SIDE SHRUNK
+      // ====================================================
 
       if (X->left == N) {
 
         if (heightb[X] > 0) {
 
           G = pos3.second;
-          b = heightb[X->right]; 
-          if (heightb[X->right] < 0 )
+
+          b = heightb[X->right];
+
+          if (heightb[X->right] < 0)
             N = left_right_rotate(X, X->right);
           else
             N = left_rotate(X, X->right);
@@ -617,27 +682,35 @@ public:
         } else {
 
           if (heightb[X] == 0) {
+
             heightb[X] = 1;
             break;
           }
 
           heightb[X] = 0;
 
-          N = X; 
+          N = X;
+
+          auto pos4 = search(N->key, tree);
+
           X = pos4.second;
 
           continue;
         }
       }
 
-      // RIGHT SIDE DELETE
+      // ====================================================
+      // RIGHT SIDE SHRUNK
+      // ====================================================
 
       else if (X->right == N) {
 
         if (heightb[X] < 0) {
 
           G = pos3.second;
+
           b = heightb[X->left];
+
           if (heightb[X->left] <= 0)
             N = right_left_rotate(X, X->left);
           else
@@ -646,6 +719,7 @@ public:
         } else {
 
           if (heightb[X] == 0) {
+
             heightb[X] = -1;
             break;
           }
@@ -653,30 +727,39 @@ public:
           heightb[X] = 0;
 
           N = X;
+
+          auto pos4 = search(N->key, tree);
+
           X = pos4.second;
 
           continue;
         }
       }
 
-      // ATTACH
+      // ====================================================
+      // REATTACH
+      // ====================================================
 
       if (G == nullptr)
         tree = N;
 
-      else if (G->key >= N->key)
+      else if (was_left_child)
         G->left = N;
 
       else
         G->right = N;
 
-      if(b==0) break;
-    }
-  }
+      // height stopped changing
+      if (b == 0)
+        break;
 
-  // ============================================================
-  // TREE PRINTER
-  // ============================================================
+      auto pos5 = search(N->key, tree);
+
+      X = pos5.second;
+    }
+  } // ============================================================
+    // TREE PRINTER
+    // ============================================================
 
 private:
   void printTreeInternal(node *root, std::string indent, bool last) {
@@ -940,8 +1023,10 @@ public:
 
     std::shuffle(vals.begin(), vals.end(), g);
 
+    std::cout << "INSERTION SECTION STARTS\n";
     for (auto v : vals) {
 
+      std::cout << v << std::endl;
       t.insertion(v);
 
       t.assertCorrect();
@@ -949,8 +1034,10 @@ public:
 
     std::shuffle(vals.begin(), vals.end(), g);
 
+    std::cout << "DELETION SECTION STARTS\n";
     for (auto v : vals) {
 
+      std::cout << v << std::endl;
       t.deletion(v);
 
       t.assertCorrect();
