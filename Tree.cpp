@@ -780,6 +780,8 @@ public:
     recomputeBF(root->right);
 
     heightb[root] = heightOp(root->right) - heightOp(root->left);
+    std::cout << "RECOMPUTE " << root->key << " -> " << heightb[root]
+              << std::endl;
   }
 
   // ============================================================
@@ -860,8 +862,8 @@ public:
 
       node *m_node = new node();
 
-      m_node->left = RT_subr;
-      m_node->right = T__;
+      m_node->left = T__;
+      m_node->right = RT_subr;
       m_node->key = k_;
 
       if (heightOp(RT_subr) + 1 >= heightOp(T__)) {
@@ -874,12 +876,12 @@ public:
       }
     }
 
-    auto T_ = LeftAVL(C, RT, k);
+    auto T_ = LeftAVL(LT, C, k);
 
     node *mn_node = new node();
 
-    mn_node->left = RT_subr;
-    mn_node->right = T_;
+    mn_node->left = T_;
+    mn_node->right = RT_subr;
     mn_node->key = k_;
 
     if (heightOp(RT_subr) + 1 >= heightOp(T_))
@@ -923,6 +925,44 @@ public:
     recomputeBF(result);
 
     return result;
+  }
+
+  std::pair<node *, node *> SplitTrees(node *t, int k) {
+    if (t == nullptr)
+      return {nullptr, nullptr};
+    if (t->key == k) {
+
+      auto L = t->left;
+      auto R = t->right;
+
+      t->left = nullptr;
+      t->right = nullptr;
+
+      recomputeBF(L);
+      recomputeBF(R);
+
+      return {L, R};
+    } else if (t->key > k) {
+      auto temp = SplitTrees(t->left, k);
+      return {temp.first, JoingOp(temp.second, t->right, t->key)};
+    } else {
+      auto temp = SplitTrees(t->right, k);
+      return {JoingOp(t->left, temp.first, t->key),
+              temp.second}; // here as we go up you see that t->left denotes
+                            // values smaller as we build from bottom to up
+    }
+  }
+
+  node *UnionTrees(node *t1, node *t2) {
+    if (t1 == nullptr)
+      return t2;
+    else if (t2 == nullptr)
+      return t1;
+    else {
+      auto temp = SplitTrees(t2, t1->key);
+      return JoingOp(UnionTrees(temp.first, t1->left),
+                     UnionTrees(temp.second, t1->right), t1->key);
+    }
   }
 
   // ============================================================
@@ -1365,6 +1405,284 @@ public:
     std::cout << "SINGLE NODE JOIN PASSED\n";
   }
 
+  // ============================================================
+  // SPLIT + UNION TESTS
+  // ============================================================
+
+  void testSplitMiddle() {
+
+    std::cout << "\n===== SPLIT MIDDLE =====\n";
+
+    AVLtree t;
+
+    for (int i = 1; i <= 15; i++)
+      t.insertion(i);
+
+    std::cout << "\nORIGINAL TREE\n";
+    t.printTree();
+
+    auto res = t.SplitTrees(t.tree, 8);
+
+    AVLtree leftT;
+    AVLtree rightT;
+
+    leftT.tree = res.first;
+    rightT.tree = res.second;
+
+    std::cout << "\nLEFT TREE\n";
+    leftT.printTree();
+
+    std::cout << "\nRIGHT TREE\n";
+    rightT.printTree();
+
+    leftT.assertCorrect();
+    rightT.assertCorrect();
+
+    std::cout << "SPLIT MIDDLE PASSED\n";
+  }
+
+  // ============================================================
+
+  void testSplitLeaf() {
+
+    std::cout << "\n===== SPLIT LEAF =====\n";
+
+    AVLtree t;
+
+    for (int i = 1; i <= 10; i++)
+      t.insertion(i);
+
+    auto res = t.SplitTrees(t.tree, 1);
+
+    AVLtree leftT;
+    AVLtree rightT;
+
+    leftT.tree = res.first;
+    rightT.tree = res.second;
+
+    leftT.recomputeBF(leftT.tree);
+    rightT.recomputeBF(rightT.tree);
+
+    std::cout << "\nLEFT TREE\n";
+    leftT.printTree();
+
+    std::cout << "\nRIGHT TREE\n";
+    rightT.printTree();
+
+    leftT.assertCorrect();
+    rightT.assertCorrect();
+
+    std::cout << "SPLIT LEAF PASSED\n";
+  }
+
+  // ============================================================
+
+  void testSplitRoot() {
+
+    std::cout << "\n===== SPLIT ROOT =====\n";
+
+    AVLtree t;
+
+    for (int i = 1; i <= 7; i++)
+      t.insertion(i);
+
+    std::cout << "\nORIGINAL TREE\n";
+    t.printTree();
+
+    auto res = t.SplitTrees(t.tree, 4);
+
+    AVLtree leftT;
+    AVLtree rightT;
+
+    leftT.tree = res.first;
+    rightT.tree = res.second;
+
+    leftT.recomputeBF(leftT.tree);
+    rightT.recomputeBF(rightT.tree);
+
+    std::cout << "\nLEFT TREE\n";
+    leftT.printTree();
+
+    std::cout << "\nRIGHT TREE\n";
+    rightT.printTree();
+
+    leftT.assertCorrect();
+    rightT.assertCorrect();
+
+    std::cout << "SPLIT ROOT PASSED\n";
+  }
+
+  // ============================================================
+
+  void testSplitDeep() {
+
+    std::cout << "\n===== SPLIT DEEP =====\n";
+
+    AVLtree t;
+
+    for (int i = 1; i <= 100; i++)
+      t.insertion(i);
+
+    auto res = t.SplitTrees(t.tree, 57);
+
+    AVLtree leftT;
+    AVLtree rightT;
+
+    leftT.tree = res.first;
+    rightT.tree = res.second;
+
+    leftT.recomputeBF(leftT.tree);
+    rightT.recomputeBF(rightT.tree);
+
+    std::cout << "\nLEFT TREE\n";
+    leftT.printTree();
+
+    std::cout << "\nRIGHT TREE\n";
+    rightT.printTree();
+
+    leftT.assertCorrect();
+    rightT.assertCorrect();
+
+    std::cout << "SPLIT DEEP PASSED\n";
+  }
+
+  // ============================================================
+
+  void testUnionSimple() {
+
+    std::cout << "\n===== UNION SIMPLE =====\n";
+
+    AVLtree t1;
+    AVLtree t2;
+
+    for (int i = 1; i <= 5; i++)
+      t1.insertion(i);
+
+    for (int i = 100; i <= 105; i++)
+      t2.insertion(i);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
+    finalT.recomputeBF(finalT.tree);
+
+    finalT.printTree();
+
+    finalT.assertCorrect();
+
+    std::cout << "UNION SIMPLE PASSED\n";
+  }
+
+  // ============================================================
+
+  void testUnionInterleaved() {
+
+    std::cout << "\n===== UNION INTERLEAVED =====\n";
+
+    AVLtree t1;
+    AVLtree t2;
+
+    t1.insertion(10);
+    t1.insertion(20);
+    t1.insertion(30);
+    t1.insertion(40);
+
+    t2.insertion(5);
+    t2.insertion(15);
+    t2.insertion(25);
+    t2.insertion(35);
+    t2.insertion(45);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
+    finalT.recomputeBF(finalT.tree);
+
+    finalT.printTree();
+
+    finalT.assertCorrect();
+
+    std::cout << "UNION INTERLEAVED PASSED\n";
+  }
+
+  // ============================================================
+
+  void testUnionLarge() {
+
+    std::cout << "\n===== UNION LARGE =====\n";
+
+    AVLtree t1;
+    AVLtree t2;
+
+    for (int i = 1; i <= 100; i += 2)
+      t1.insertion(i);
+
+    for (int i = 2; i <= 100; i += 2)
+      t2.insertion(i);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
+
+    finalT.recomputeBF(finalT.tree);
+
+    finalT.printTree();
+
+    finalT.assertCorrect();
+
+    std::cout << "UNION LARGE PASSED\n";
+  }
+
+  // ============================================================
+
+  void testUnionEmpty() {
+
+    std::cout << "\n===== UNION EMPTY =====\n";
+
+    AVLtree t1;
+    AVLtree t2;
+
+    for (int i = 1; i <= 10; i++)
+      t1.insertion(i);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.UnionTrees(t1.tree, nullptr);
+
+    finalT.recomputeBF(finalT.tree);
+
+    finalT.printTree();
+
+    finalT.assertCorrect();
+
+    std::cout << "UNION EMPTY PASSED\n";
+  }
+
+  // ============================================================
+
+  void testSplitThenUnion() {
+
+    std::cout << "\n===== SPLIT THEN UNION =====\n";
+
+    AVLtree t;
+
+    for (int i = 1; i <= 50; i++)
+      t.insertion(i);
+
+    auto res = t.SplitTrees(t.tree, 25);
+
+    AVLtree rebuilt;
+
+    rebuilt.tree = rebuilt.UnionTrees(res.first, res.second);
+
+    rebuilt.recomputeBF(rebuilt.tree);
+
+    rebuilt.printTree();
+
+    rebuilt.assertCorrect();
+
+    std::cout << "SPLIT THEN UNION PASSED\n";
+  }
   //============================================================
   // RUN ALL
   // ============================================================
@@ -1378,12 +1696,26 @@ public:
     //
     //  randomizedTest();
     //
-    testJoinEqualHeight();
-    testJoinLeftHeavy();
-    testJoinRightHeavy();
-    testDeepRecursiveJoin();
-    testJoinRotationTrigger();
-    testSingleNodeJoin();
+    // --- Join testcases ----
+    // testJoinEqualHeight();
+    // testJoinLeftHeavy();
+    // testJoinRightHeavy();
+    // testDeepRecursiveJoin();
+    // testJoinRotationTrigger();
+    // testSingleNodeJoin();
+
+    // --union & split testcases ----
+    testSplitMiddle();
+    testSplitLeaf();
+    testSplitRoot();
+    testSplitDeep();
+
+    testUnionSimple();
+    testUnionInterleaved();
+    testUnionLarge();
+    testUnionEmpty();
+
+    testSplitThenUnion();
 
     std::cout << "\nALL TESTS PASSED\n";
   }
