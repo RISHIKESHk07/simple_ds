@@ -759,29 +759,61 @@ public:
     }
   }
   int heightOp(node *n) {
+
     if (n == nullptr)
       return 0;
+
     return std::max(heightOp(n->left), heightOp(n->right)) + 1;
   }
+
+  // ============================================================
+  // RECOMPUTE ALL BALANCE FACTORS
+  // BF = RIGHT HEIGHT - LEFT HEIGHT
+  // ============================================================
+
+  void recomputeBF(node *root) {
+
+    if (root == nullptr)
+      return;
+
+    recomputeBF(root->left);
+    recomputeBF(root->right);
+
+    heightb[root] = heightOp(root->right) - heightOp(root->left);
+  }
+
+  // ============================================================
+  // RIGHT AVL JOIN
+  // ============================================================
+
   node *RightAVl(node *LT, node *RT, int k) {
+
     auto LT_subl = LT->left;
     auto C = LT->right;
     auto k_ = LT->key;
+
     if (heightOp(C) <= heightOp(RT) + 1) {
+
       auto T__ = new node();
+
       T__->left = C;
       T__->right = RT;
       T__->key = k;
+
       if (heightOp(LT_subl) + 1 >= heightOp(T__)) {
+
         node *m_node = new node();
+
         m_node->left = LT_subl;
         m_node->right = T__;
         m_node->key = k_;
+
         return m_node;
 
       } else {
 
         node *n_node = new node();
+
         n_node->left = LT_subl;
         n_node->right = T__;
         n_node->key = k_;
@@ -789,64 +821,108 @@ public:
         return left_right_rotate(n_node, n_node->right);
       }
     }
+
     auto T_ = RightAVl(C, RT, k);
+
     node *m_node = new node();
+
     m_node->left = LT_subl;
     m_node->right = T_;
     m_node->key = k_;
 
     if (heightOp(LT->left) <= heightOp(T_) + 1) {
+
       return m_node;
+
     } else {
+
       return left_rotate(m_node, m_node->right);
     }
   }
 
+  // ============================================================
+  // LEFT AVL JOIN
+  // ============================================================
+
   node *LeftAVL(node *LT, node *RT, int k) {
+
     auto RT_subr = RT->right;
     auto C = RT->left;
     auto k_ = RT->key;
 
     if (heightOp(C) <= heightOp(LT) + 1) {
+
       auto T__ = new node();
+
       T__->left = LT;
       T__->right = C;
       T__->key = k;
+
       node *m_node = new node();
+
       m_node->left = RT_subr;
       m_node->right = T__;
       m_node->key = k_;
+
       if (heightOp(RT_subr) + 1 >= heightOp(T__)) {
+
         return m_node;
+
       } else {
+
         return right_left_rotate(m_node, m_node->left);
       }
     }
+
     auto T_ = LeftAVL(C, RT, k);
+
     node *mn_node = new node();
+
     mn_node->left = RT_subr;
     mn_node->right = T_;
     mn_node->key = k_;
+
     if (heightOp(RT_subr) + 1 >= heightOp(T_))
       return mn_node;
     else
       return right_rotate(mn_node, mn_node->left);
   }
 
+  // ============================================================
+  // JOIN OPERATION
+  // ============================================================
+
   node *JoingOp(node *LT, node *RT, int k) {
+
+    node *result = nullptr;
+
     if (heightOp(LT) == heightOp(RT)) {
+
       node *new_tree = new node();
+
       new_tree->left = LT;
       new_tree->right = RT;
       new_tree->key = k;
-      return new_tree;
+
+      result = new_tree;
     }
-    if (heightOp(LT) > heightOp(RT))
-      return RightAVl(LT, RT,
-                      k); // here we know that RT tree content are bigger the LT
-                          // >k , actually non overlapping contents
-    else
-      return LeftAVL(LT, RT, k);
+
+    else if (heightOp(LT) > heightOp(RT)) {
+
+      result = RightAVl(LT, RT, k);
+
+    } else {
+
+      result = LeftAVL(LT, RT, k);
+    }
+
+    // ========================================================
+    // FIX ALL BALANCE FACTORS ONCE AT END
+    // ========================================================
+
+    recomputeBF(result);
+
+    return result;
   }
 
   // ============================================================
