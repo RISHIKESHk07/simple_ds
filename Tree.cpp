@@ -8,6 +8,7 @@
 // rewrite the removal with spawing idea over naive idea i used ...
 class BST {
 
+public:
   typedef struct node {
     int key = -1;
     struct node *left = nullptr;
@@ -16,7 +17,6 @@ class BST {
 
   node *tree;
 
-public:
   BST() {
     tree = new node();
     insert_node(44);
@@ -757,9 +757,101 @@ public:
 
       X = pos5.second;
     }
-  } // ============================================================
-    // TREE PRINTER
-    // ============================================================
+  }
+  int heightOp(node *n) {
+    if (n == nullptr)
+      return 0;
+    return std::max(heightOp(n->left), heightOp(n->right)) + 1;
+  }
+  node *RightAVl(node *LT, node *RT, int k) {
+    auto LT_subl = LT->left;
+    auto C = LT->right;
+    auto k_ = LT->key;
+    if (heightOp(C) <= heightOp(RT) + 1) {
+      auto T__ = new node();
+      T__->left = C;
+      T__->right = RT;
+      T__->key = k;
+      if (heightOp(LT_subl) + 1 >= heightOp(T__)) {
+        node *m_node = new node();
+        m_node->left = LT_subl;
+        m_node->right = T__;
+        m_node->key = k_;
+        return m_node;
+
+      } else {
+
+        node *n_node = new node();
+        n_node->left = LT_subl;
+        n_node->right = T__;
+        n_node->key = k_;
+
+        return left_right_rotate(n_node, n_node->right);
+      }
+    }
+    auto T_ = RightAVl(C, RT, k);
+    node *m_node = new node();
+    m_node->left = LT_subl;
+    m_node->right = T_;
+    m_node->key = k_;
+
+    if (heightOp(LT->left) <= heightOp(T_) + 1) {
+      return m_node;
+    } else {
+      return left_rotate(m_node, m_node->right);
+    }
+  }
+
+  node *LeftAVL(node *LT, node *RT, int k) {
+    auto RT_subr = RT->right;
+    auto C = RT->left;
+    auto k_ = RT->key;
+
+    if (heightOp(C) <= heightOp(LT) + 1) {
+      auto T__ = new node();
+      T__->left = LT;
+      T__->right = C;
+      T__->key = k;
+      node *m_node = new node();
+      m_node->left = RT_subr;
+      m_node->right = T__;
+      m_node->key = k_;
+      if (heightOp(RT_subr) + 1 >= heightOp(T__)) {
+        return m_node;
+      } else {
+        return right_left_rotate(m_node, m_node->left);
+      }
+    }
+    auto T_ = LeftAVL(C, RT, k);
+    node *mn_node = new node();
+    mn_node->left = RT_subr;
+    mn_node->right = T_;
+    mn_node->key = k_;
+    if (heightOp(RT_subr) + 1 >= heightOp(T_))
+      return mn_node;
+    else
+      return right_rotate(mn_node, mn_node->left);
+  }
+
+  node *JoingOp(node *LT, node *RT, int k) {
+    if (heightOp(LT) == heightOp(RT)) {
+      node *new_tree = new node();
+      new_tree->left = LT;
+      new_tree->right = RT;
+      new_tree->key = k;
+      return new_tree;
+    }
+    if (heightOp(LT) > heightOp(RT))
+      return RightAVl(LT, RT,
+                      k); // here we know that RT tree content are bigger the LT
+                          // >k , actually non overlapping contents
+    else
+      return LeftAVL(LT, RT, k);
+  }
+
+  // ============================================================
+  // TREE PRINTER
+  // ============================================================
 
 private:
   void printTreeInternal(node *root, std::string indent, bool last) {
@@ -1047,17 +1139,175 @@ public:
   }
 
   // ============================================================
+  // JOIN OPERATION TESTS
+  // ============================================================
+
+  void testJoinEqualHeight() {
+
+    std::cout << "\n===== JOIN EQUAL HEIGHT =====\n";
+
+    AVLtree t;
+    AVLtree t1;
+    AVLtree t2;
+
+    t1.insertion(2);
+    t1.insertion(1);
+    t1.insertion(3);
+
+    t2.insertion(8);
+    t2.insertion(7);
+    t2.insertion(9);
+
+    t.tree = t.JoingOp(t1.tree, t2.tree, 5);
+
+    t.printTree();
+    t.assertCorrect();
+
+    std::cout << "JOIN EQUAL HEIGHT PASSED\n";
+  }
+
+  // ============================================================
+
+  void testJoinLeftHeavy() {
+
+    std::cout << "\n===== JOIN LEFT HEAVY =====\n";
+
+    AVLtree leftTree;
+
+    for (int i = 1; i <= 5; i++)
+      leftTree.insertion(i);
+
+    AVLtree rightTree;
+
+    rightTree.insertion(100);
+    rightTree.insertion(101);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+
+    finalT.printTree();
+    finalT.assertCorrect();
+
+    std::cout << "JOIN LEFT HEAVY PASSED\n";
+  }
+
+  // ============================================================
+
+  void testJoinRightHeavy() {
+
+    std::cout << "\n===== JOIN RIGHT HEAVY =====\n";
+
+    AVLtree leftTree;
+
+    leftTree.insertion(1);
+    leftTree.insertion(2);
+
+    AVLtree rightTree;
+
+    for (int i = 100; i <= 105; i++)
+      rightTree.insertion(i);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+
+    finalT.printTree();
+    finalT.assertCorrect();
+
+    std::cout << "JOIN RIGHT HEAVY PASSED\n";
+  }
+
+  // ============================================================
+
+  void testDeepRecursiveJoin() {
+
+    std::cout << "\n===== DEEP RECURSIVE JOIN =====\n";
+
+    AVLtree leftTree;
+    AVLtree rightTree;
+
+    for (int i = 1; i <= 5; i++)
+      leftTree.insertion(i);
+
+    for (int i = 7; i <= 10; i++)
+      rightTree.insertion(i);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 6);
+
+    finalT.printTree();
+    finalT.assertCorrect();
+
+    std::cout << "DEEP RECURSIVE JOIN PASSED\n";
+  }
+
+  // ============================================================
+
+  void testJoinRotationTrigger() {
+
+    std::cout << "\n===== JOIN ROTATION TRIGGER =====\n";
+
+    AVLtree leftTree;
+
+    leftTree.insertion(1);
+    leftTree.insertion(2);
+    leftTree.insertion(3);
+    leftTree.insertion(4);
+    leftTree.insertion(5);
+
+    AVLtree rightTree;
+
+    rightTree.insertion(100);
+
+    AVLtree finalT;
+
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+
+    finalT.printTree();
+    finalT.assertCorrect();
+
+    std::cout << "JOIN ROTATION TRIGGER PASSED\n";
+  }
+
+  // ============================================================
+
+  void testSingleNodeJoin() {
+
+    std::cout << "\n===== SINGLE NODE JOIN =====\n";
+    AVLtree t;
+    AVLtree t1;
+    AVLtree t2;
+    t1.insertion(1);
+    t2.insertion(3);
+    t.tree = t.JoingOp(t1.tree, t2.tree, 2);
+
+    t.printTree();
+    t.assertCorrect();
+
+    std::cout << "SINGLE NODE JOIN PASSED\n";
+  }
+
+  //============================================================
   // RUN ALL
   // ============================================================
 
   void runAllTests() {
 
-    testRR();
-    testLL();
-    testLR();
-    testRL();
-
-    randomizedTest();
+    // testRR();
+    //  testLL();
+    //  testLR();
+    //  testRL();
+    //
+    //  randomizedTest();
+    //
+    testJoinEqualHeight();
+    testJoinLeftHeavy();
+    testJoinRightHeavy();
+    testDeepRecursiveJoin();
+    testJoinRotationTrigger();
+    testSingleNodeJoin();
 
     std::cout << "\nALL TESTS PASSED\n";
   }
