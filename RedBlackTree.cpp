@@ -123,13 +123,33 @@ public:
         std::cout << dir << std::endl;
         if (!U || U->color == Color::black) {
           std::cout << "case 5 & 6" << std::endl;
+          auto G_parent = G->parent;
+          Direction G_parent_dir =
+              G_parent ? ((G_parent->right == G) ? Direction::RIGHT
+                                                 : Direction::LEFT)
+                       : Direction::LEFT;
+
           if (X->child[1 - dir] == N) {
-            auto new_root = subtree_rotation(G, dir);
+            auto new_root = subtree_rotation(X, dir);
+            G->child[dir] = new_root;
+            N = X;
+            X = new_root;
           }
           auto new_root2 = subtree_rotation(G, return_dir_opposite(dir));
           new_root2->color = Color::black;
           new_root2->child[1 - dir]->color = Color::red;
           X = new_root2;
+
+          new_root2->parent = G_parent;
+          if (G_parent == nullptr) {
+            tree = new_root2;
+          } else {
+            G_parent->child[G_parent_dir] = new_root2;
+            if (G_parent_dir == Direction::RIGHT)
+              G_parent->right = new_root2;
+            else
+              G_parent->left = new_root2;
+          }
 
           return;
         }
@@ -142,6 +162,10 @@ public:
           G->color = Color::red;
           X->color = Color::black;
           U->color = Color::black;
+
+          N = G;
+          X = G->parent;
+          continue;
         }
       }
 
@@ -185,11 +209,24 @@ public:
       pod = n.first;
     }
 
-    // root deletion
-    if (pod->parent == nullptr && pod->left == nullptr &&
-        pod->right == nullptr) {
-      tree = nullptr;
-      return;
+    // root deletion cases
+
+    if (pod->parent == nullptr) {
+
+      if (pod->left == nullptr && pod->right == nullptr) {
+        tree = nullptr;
+        return;
+      } else if (pod->left) {
+        tree = pod->left;
+        tree->parent = nullptr;
+        tree->color = Color::black;
+        return;
+      } else {
+        tree = pod->right;
+        tree->parent = nullptr;
+        tree->color = Color::black;
+        return;
+      }
     }
 
     auto rl = (pod->parent->right == pod) ? 1 : 0;
@@ -250,14 +287,15 @@ public:
       std::cout << X->key << std::endl;
       auto N = X->child[dir];
       do {
-        auto S = X->child[1 - dir];
-        auto C = S->child[dir];
-        auto D = S->child[1 - dir];
-        if (N && X->child[dir]->parent == nullptr) {
+
+        if (X == nullptr) {
           // change in color required at all
           std::cout << "root del in loop" << std::endl;
           return;
         } else {
+          auto S = X->child[1 - dir];
+          auto C = S->child[dir];
+          auto D = S->child[1 - dir];
 
           if (get_Color(X) == Color::black && get_Color(S) == Color::red &&
               get_Color(C) == Color::black && get_Color(D) == Color::black) {
@@ -265,33 +303,30 @@ public:
             // case #3
             std::cout << "del case 3" << std::endl;
 
-            auto new_root = subtree_rotation(S, dir);
+            auto new_root = subtree_rotation(X, dir);
 
             new_root->color = Color::black;
             new_root->child[dir]->color = Color::red;
+
+            // variable updates required here to make sure this is conssitent
+            X = X;
+            S = C;
+            C = S->child[dir];
+            D = S->child[1 - dir];
 
             if (get_Color(S) == Color::black && get_Color(C) == Color::red &&
                 get_Color(D) == Color::black) {
 
               // case 5
               std::cout << "del case 3->5" << std::endl;
-
-              auto new_root = subtree_rotation(S, return_dir_opposite(dir));
-
-              new_root->color = Color::black;
-              new_root->child[1 - dir]->color = Color::red;
+              goto case_5;
             }
 
             if (get_Color(S) == Color::black && get_Color(D) == Color::red) {
 
               // case 6
               std::cout << "del case 3->6" << std::endl;
-
-              auto new_root2 = subtree_rotation(X, dir);
-
-              new_root2->child[dir]->color = Color::black;
-
-              new_root2->child[1 - dir]->color = Color::black;
+              goto case_6;
             }
 
             if (get_Color(X) == Color::red && get_Color(S) == Color::black &&
@@ -346,8 +381,11 @@ public:
 
         N = X;
         X = X->parent;
-        if (N->parent != nullptr)
-          dir = (N->parent->right == X) ? Direction::RIGHT : Direction::LEFT;
+        if (X != nullptr)
+          dir = (X->right == N)
+                    ? Direction::RIGHT
+                    : Direction::LEFT; // made a sumb mistake here dir was
+                                       // comparing wrong stuff
 
       } while (X != nullptr);
       return;
@@ -356,6 +394,7 @@ public:
           subtree_rotation(X->child[1 - dir], return_dir_opposite(dir));
       new_root->color = Color::black;
       new_root->child[1 - dir]->color = Color::red;
+      
       goto case_6;
     }
     case_6: {
@@ -610,6 +649,7 @@ public:
     for (int i = 10; i >= 1; i--) {
 
       tree.deletion(i);
+      print_tree(tree);
 
       validate_tree(tree);
     }
@@ -637,9 +677,9 @@ public:
     // RANDOM INSERTS
 
     for (auto v : vals) {
-
+      std::cout << v << "inserting ..." << std::endl;
       tree.insertion(v);
-
+      print_tree(tree);
       validate_tree(tree);
     }
 
@@ -649,8 +689,10 @@ public:
 
     for (auto v : vals) {
 
-      tree.deletion(v);
+      std::cout << v << "deleting .. " << std::endl;
 
+      tree.deletion(v);
+      print_tree(tree);
       validate_tree(tree);
     }
 
@@ -747,13 +789,13 @@ public:
 
     test_single_insert_delete();
 
-    // test_sequential_insert();
+    test_sequential_insert();
 
     test_sequential_delete();
 
-    // test_reverse_delete();
+    test_reverse_delete();
 
-    // test_random_insert_delete();
+    test_random_insert_delete();
 
     // test_root_deletes();
 
