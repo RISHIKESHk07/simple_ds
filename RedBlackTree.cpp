@@ -91,6 +91,8 @@ public:
     ins_node->parent = ins_parent.second;
     ins_node->color = Color::red;
 
+    // no = case because we do not want any duplicate node , so i will sliently
+    // not even add them , ig better logging could keep it good here .
     if (ins_parent.second == nullptr) {
       tree = ins_node;
       return;
@@ -394,18 +396,187 @@ public:
           subtree_rotation(X->child[1 - dir], return_dir_opposite(dir));
       new_root->color = Color::black;
       new_root->child[1 - dir]->color = Color::red;
-      
+
       goto case_6;
     }
     case_6: {
       auto new_root2 = subtree_rotation(X, dir);
+      new_root2->color = X->color;
       new_root2->child[dir]->color = Color::black;
       new_root2->child[1 - dir]->color = Color::black;
       return;
     }
     }
   }
+
+  int black_height(node *t) {
+    // at node t how much is th black heigth ...
+    int d = 1;
+    auto temp = t;
+    while (temp != nullptr) {
+      if (temp->color == Color::black) {
+        d++;
+      }
+      temp = temp->right;
+    }
+    return d;
+  }
+  node *RightRBJoin(node *t1, node *t2, int k) {
+    // t1 is larger here
+
+    // 4 cases too look up ...
+    // BB
+    // BR
+    // RB
+    // RR
+    // as per wiki the we can reduce this to something simpler , if t1 is only
+    // black because if you can find a red with a particular height b ehn the
+    // black node above it is the black node we are searchign for , this
+    // bypasses all the complicated Red nodes
+    if (t1->color == Color::black && black_height(t1) == black_height(t2)) {
+      auto T = new node();
+      T->parent = t1->parent;
+      T->color = Color::red;
+      T->key = k;
+      T->left = t1;
+      T->right = t2;
+      t1->parent = T;
+      t2->parent = T;
+      return T;
+    }
+    auto Below_res = RightRBJoin(t1->right, t2, k);
+    auto T2 = new node();
+    T2->parent = t1->parent;
+    T2->left = t1->left;
+    T2->key = t1->key;
+    T2->right = Below_res;
+    T2->color = t1->color;
+    Below_res->parent = T2;
+    t1->left->parent = T2;
+
+    // two cases of violation is solved this one line when we have
+    if (t1->color == Color::black && T2->right->right->color == Color::red &&
+        T2->right->color == Color::red) {
+      T2->right->right->color = Color::black;
+      return subtree_rotation(T2, Direction::LEFT);
+    }
+    return T2;
+  }
+  node *LeftRBJoin(node *t1, node *t2, int k) {
+    // t1 is larger here
+
+    // 4 cases too look up ...
+    // BB
+    // BR
+    // RB
+    // RR
+    // as per wiki the we can reduce this to something simpler , if t1 is only
+    // black because if you can find a red with a particular height b ehn the
+    // black node above it is the black node we are searchign for , this
+    // bypasses all the complicated Red nodes
+    if (t2->color == Color::black && black_height(t1) == black_height(t2)) {
+      auto T = new node();
+      T->parent = t2->parent;
+      T->color = Color::red;
+      T->key = k;
+      T->left = t1;
+      T->right = t2;
+      t1->parent = T;
+      t2->parent = T;
+      return T;
+    }
+    auto Below_res = LeftRBJoin(t1, t2->left, k);
+    auto T2 = new node();
+    T2->parent = t2->parent;
+    T2->right = t2->right;
+    T2->key = t2->key;
+    T2->left = Below_res;
+    T2->color = t2->color;
+    Below_res->parent = T2;
+    t2->right->parent = T2;
+
+    // two cases of violation is solved this one line when we have
+    if (t2->color == Color::black && T2->left->left->color == Color::red &&
+        T2->left->color == Color::red) {
+      T2->left->left->color = Color::black;
+      return subtree_rotation(T2, Direction::RIGHT);
+    }
+    return T2;
+  }
+
+  node *JoinOP(node *t1, node *t2, int k) { 
+    if (black_height(t1) > black_height(t2)) {
+      auto T1 = RightRBJoin(t1, t2, k);
+      if (T1->color == Color::red && T1->right->color == Color::red) {
+        T1->color = Color::black;
+      }
+      return T1;
+
+    } else if (black_height(t1) < black_height(t2)) {
+      auto T1 = LeftRBJoin(t1, t2, k);
+      if (T1->color == Color::red && T1->left->color == Color::red) {
+
+        T1->color = Color::black;
+      }
+      return T1;
+    } else {
+      node *res = new node();
+      res->left = t1;
+      res->right = t2;
+      if (t1)
+        t1->parent = res;
+      if (t2)
+        t2->parent = res;
+      res->key = k;
+      if (t1->color == Color::black && t2->color == Color::black) {
+
+        res->color = Color::red;
+        return res;
+      }
+      res->color = Color::black;
+      return res;
+    }
+  }
+  std::pair<node *, node *> SplitOP(node *t, int k) {
+    if (t == nullptr)
+      return {nullptr, nullptr};
+    else if (t->key == k) {
+      t->left->parent = nullptr;
+      t->right->parent = nullptr;
+      return {t->left, t->right};
+    } else if (t->key > k) {
+      auto S = SplitOP(t->left, k);
+      return {S.first, JoinOP(S.second, t->right, t->key)};
+    } else {
+      auto S = SplitOP(t->right, k);
+      return {JoinOP(t->left, S.first, t->key), S.second};
+    }
+  }
+  node *unionOP(node *t1, node *t2) {
+
+    if (t1 == nullptr)
+      return t2;
+
+    if (t2 == nullptr)
+      return t1;
+
+    auto L = t2->left;
+    auto R = t2->right;
+
+    if (L)
+      L->parent = nullptr;
+    if (R)
+      R->parent = nullptr;
+
+    t2->left = nullptr;
+    t2->right = nullptr;
+
+    auto S2 = SplitOP(t1, t2->key);
+
+    return JoinOP(unionOP(L, S2.first), unionOP(S2.second, R), t2->key);
+  }
 };
+
 // Extra stuff for the tests ....
 #include <algorithm>
 #include <cassert>
@@ -772,6 +943,8 @@ public:
 
     RedBlackTree tree;
 
+    tree.insertion(30);
+    tree.insertion(20);
     tree.insertion(10);
     tree.insertion(10);
     tree.insertion(10);
@@ -780,7 +953,218 @@ public:
 
     print_tree(tree);
   }
+  static void inorder(node *root, std::vector<int> &vals) {
 
+    if (!root)
+      return;
+
+    inorder(root->left, vals);
+
+    vals.push_back(root->key);
+
+    inorder(root->right, vals);
+  }
+
+  static void validate_bst(node *root, long long minv = LLONG_MIN,
+                           long long maxv = LLONG_MAX) {
+
+    if (!root)
+      return;
+
+    if (root->key <= minv || root->key >= maxv) {
+
+      std::cout << RED << "BST VIOLATION at " << root->key << RESET << "\n";
+
+      std::exit(1);
+    }
+
+    validate_bst(root->left, minv, root->key);
+
+    validate_bst(root->right, root->key, maxv);
+  }
+  static void test_join_operation() {
+
+    std::cout << "\n[TEST] JOIN OPERATION\n";
+
+    RedBlackTree left_tree;
+    RedBlackTree right_tree;
+
+    for (int i = 1; i <= 10; i++)
+      left_tree.insertion(i);
+
+    for (int i = 20; i <= 30; i++)
+      right_tree.insertion(i);
+
+    validate_tree(left_tree);
+    validate_tree(right_tree);
+
+    RedBlackTree result;
+
+    result.tree = result.JoinOP(left_tree.tree, right_tree.tree, 15);
+
+    if (result.tree)
+      result.tree->color = RedBlackTree::Color::black;
+
+    print_tree(result);
+
+    validate_tree(result);
+
+    std::vector<int> vals;
+
+    inorder(result.tree, vals);
+
+    std::cout << "INORDER: ";
+
+    for (auto v : vals)
+      std::cout << v << " ";
+
+    std::cout << "\n";
+  }
+  static void test_split_operation() {
+
+    std::cout << "\n[TEST] SPLIT OPERATION\n";
+
+    RedBlackTree tree;
+
+    for (int i = 1; i <= 20; i++)
+      tree.insertion(i);
+
+    validate_tree(tree);
+
+    auto res = tree.SplitOP(tree.tree, 10);
+
+    RedBlackTree left_tree;
+    RedBlackTree right_tree;
+
+    left_tree.tree = res.first;
+    right_tree.tree = res.second;
+
+    std::cout << "\nLEFT TREE\n";
+
+    print_tree(left_tree);
+
+    validate_tree(left_tree);
+
+    std::cout << "\nRIGHT TREE\n";
+
+    print_tree(right_tree);
+
+    validate_tree(right_tree);
+
+    std::vector<int> left_vals;
+    std::vector<int> right_vals;
+
+    inorder(left_tree.tree, left_vals);
+    inorder(right_tree.tree, right_vals);
+
+    std::cout << "LEFT INORDER: ";
+
+    for (auto v : left_vals)
+      std::cout << v << " ";
+
+    std::cout << "\n";
+
+    std::cout << "RIGHT INORDER: ";
+
+    for (auto v : right_vals)
+      std::cout << v << " ";
+
+    std::cout << "\n";
+  }
+  static void test_union_operation() {
+
+    std::cout << "\n[TEST] UNION OPERATION\n";
+
+    RedBlackTree t1;
+    RedBlackTree t2;
+
+    for (int i = 1; i <= 20; i += 2)
+      t1.insertion(i);
+
+    for (int i = 2; i <= 20; i += 2)
+      t2.insertion(i);
+
+    validate_tree(t1);
+    validate_tree(t2);
+
+    RedBlackTree result;
+
+    result.tree = result.unionOP(t1.tree, t2.tree);
+
+    if (result.tree)
+      result.tree->color = RedBlackTree::Color::black;
+
+    print_tree(result);
+
+    validate_tree(result);
+
+    std::vector<int> vals;
+
+    inorder(result.tree, vals);
+
+    std::cout << "UNION INORDER: ";
+
+    for (auto v : vals)
+      std::cout << v << " ";
+
+    std::cout << "\n";
+  }
+  static void test_random_union_stress() {
+
+    std::cout << "\n[TEST] RANDOM UNION STRESS\n";
+
+    std::vector<int> vals1;
+    std::vector<int> vals2;
+
+    for (int i = 0; i < 50; i++) {
+
+      vals1.push_back(i * 2);
+      vals2.push_back(i * 2 + 1);
+    }
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+
+    std::shuffle(vals1.begin(), vals1.end(), g);
+    std::shuffle(vals2.begin(), vals2.end(), g);
+
+    RedBlackTree t1;
+    RedBlackTree t2;
+
+    for (auto v : vals1)
+      t1.insertion(v);
+
+    for (auto v : vals2)
+      t2.insertion(v);
+
+    validate_tree(t1);
+    validate_tree(t2);
+
+    RedBlackTree result;
+
+    result.tree = result.unionOP(t1.tree, t2.tree);
+
+    if (result.tree)
+      result.tree->color = RedBlackTree::Color::black;
+
+    validate_tree(result);
+
+    std::vector<int> vals;
+
+    inorder(result.tree, vals);
+
+    for (int i = 1; i < vals.size(); i++) {
+
+      if (vals[i] <= vals[i - 1]) {
+
+        std::cout << RED << "ORDERING FAILURE\n" << RESET;
+
+        std::exit(1);
+      }
+    }
+
+    std::cout << GREEN << "RANDOM UNION VALID\n" << RESET;
+  }
   // ==========================================================
   // RUN ALL
   // ==========================================================
@@ -797,13 +1181,21 @@ public:
 
     test_random_insert_delete();
 
-    // test_root_deletes();
+    test_root_deletes();
 
-    // test_alternating_operations();
+    test_alternating_operations();
 
-    // test_zig_zag_case();
+    test_zig_zag_case();
 
-    // test_duplicate_inserts();
+    test_duplicate_inserts();
+
+    test_join_operation();
+
+    test_split_operation();
+
+    test_union_operation();
+
+    test_random_union_stress();
 
     std::cout << GREEN << "\nALL TESTS PASSED\n" << RESET;
   }
