@@ -1,4 +1,5 @@
 #include <iostream>
+#include <ostream>
 #include <vector>
 //  The main reason of using red black trees over the AVL tree is that they much
 //  less strict per node wise and present a solution which can make the system
@@ -433,6 +434,16 @@ public:
     // black because if you can find a red with a particular height b ehn the
     // black node above it is the black node we are searchign for , this
     // bypasses all the complicated Red nodes
+    if (t1 == nullptr) {
+      auto T = new node();
+      T->key = k;
+      T->left = nullptr; // Nothing on the left
+      T->right = t2;     // Attach t2 on the right
+      T->color = Color::red;
+      if (t2)
+        t2->parent = T;
+      return T;
+    }
     if (t1->color == Color::black && black_height(t1) == black_height(t2)) {
       auto T = new node();
       T->parent = t1->parent;
@@ -452,11 +463,13 @@ public:
     T2->right = Below_res;
     T2->color = t1->color;
     Below_res->parent = T2;
-    t1->left->parent = T2;
+    if (t1->left)
+      t1->left->parent = T2;
 
     // two cases of violation is solved this one line when we have
-    if (t1->color == Color::black && T2->right->right->color == Color::red &&
-        T2->right->color == Color::red) {
+    if (t1->color == Color::black && T2->right != nullptr &&
+        T2->right->color == Color::red && T2->right->right != nullptr &&
+        T2->right->right->color == Color::red) {
       T2->right->right->color = Color::black;
       return subtree_rotation(T2, Direction::LEFT);
     }
@@ -474,6 +487,18 @@ public:
     // black because if you can find a red with a particular height b ehn the
     // black node above it is the black node we are searchign for , this
     // bypasses all the complicated Red nodes
+    //
+    if (t2 == nullptr) {
+      auto T = new node();
+      T->key = k;
+      T->left = t1;       // Attach t1 on the left
+      T->right = nullptr; // Nothing on the right
+      T->color = Color::red;
+      if (t1)
+        t1->parent = T;
+      return T;
+    }
+
     if (t2->color == Color::black && black_height(t1) == black_height(t2)) {
       auto T = new node();
       T->parent = t2->parent;
@@ -493,18 +518,21 @@ public:
     T2->left = Below_res;
     T2->color = t2->color;
     Below_res->parent = T2;
-    t2->right->parent = T2;
+    if (t2->right)
+      t2->right->parent = T2;
 
     // two cases of violation is solved this one line when we have
-    if (t2->color == Color::black && T2->left->left->color == Color::red &&
-        T2->left->color == Color::red) {
+    if (t2->color == Color::black && T2->left != nullptr &&
+        T2->left->color == Color::red && T2->left->left != nullptr &&
+        T2->left->left->color == Color::red) {
       T2->left->left->color = Color::black;
       return subtree_rotation(T2, Direction::RIGHT);
     }
     return T2;
   }
 
-  node *JoinOP(node *t1, node *t2, int k) { 
+  node *JoinOP(node *t1, node *t2, int k) {
+
     if (black_height(t1) > black_height(t2)) {
       auto T1 = RightRBJoin(t1, t2, k);
       if (T1->color == Color::red && T1->right->color == Color::red) {
@@ -528,12 +556,14 @@ public:
       if (t2)
         t2->parent = res;
       res->key = k;
-      if (t1->color == Color::black && t2->color == Color::black) {
+      bool t1_black = (t1 == nullptr || t1->color == Color::black);
+      bool t2_black = (t2 == nullptr || t2->color == Color::black);
 
+      if (t1_black && t2_black) {
         res->color = Color::red;
-        return res;
+      } else {
+        res->color = Color::black;
       }
-      res->color = Color::black;
       return res;
     }
   }
@@ -572,7 +602,6 @@ public:
     t2->right = nullptr;
 
     auto S2 = SplitOP(t1, t2->key);
-
     return JoinOP(unionOP(L, S2.first), unionOP(S2.second, R), t2->key);
   }
 };
@@ -1116,7 +1145,7 @@ public:
     std::vector<int> vals1;
     std::vector<int> vals2;
 
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 15; i++) {
 
       vals1.push_back(i * 2);
       vals2.push_back(i * 2 + 1);
@@ -1131,11 +1160,15 @@ public:
     RedBlackTree t1;
     RedBlackTree t2;
 
-    for (auto v : vals1)
+    for (auto v : vals1) {
+      std::cout << "t1<-" << v << std::endl;
       t1.insertion(v);
+    }
 
-    for (auto v : vals2)
+    for (auto v : vals2) {
+      std::cout << "t2<-" << v << std::endl;
       t2.insertion(v);
+    }
 
     validate_tree(t1);
     validate_tree(t2);
@@ -1146,7 +1179,7 @@ public:
 
     if (result.tree)
       result.tree->color = RedBlackTree::Color::black;
-
+    print_tree(result);
     validate_tree(result);
 
     std::vector<int> vals;
