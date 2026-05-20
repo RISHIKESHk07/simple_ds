@@ -411,7 +411,6 @@ public:
   }
 
   int black_height(node *t) {
-    // at node t how much is th black heigth ...
     int d = 1;
     auto temp = t;
     while (temp != nullptr) {
@@ -422,28 +421,19 @@ public:
     }
     return d;
   }
-  node *RightRBJoin(node *t1, node *t2, int k) {
-    // t1 is larger here
 
-    // 4 cases too look up ...
-    // BB
-    // BR
-    // RB
-    // RR
-    // as per wiki the we can reduce this to something simpler , if t1 is only
-    // black because if you can find a red with a particular height b ehn the
-    // black node above it is the black node we are searchign for , this
-    // bypasses all the complicated Red nodes
+  node *RightRBJoin(node *t1, node *t2, int k) {
     if (t1 == nullptr) {
       auto T = new node();
       T->key = k;
-      T->left = nullptr; // Nothing on the left
-      T->right = t2;     // Attach t2 on the right
+      T->left = nullptr;
+      T->right = t2;
       T->color = Color::red;
       if (t2)
         t2->parent = T;
       return T;
     }
+
     if (t1->color == Color::black && black_height(t1) == black_height(t2)) {
       auto T = new node();
       T->parent = t1->parent;
@@ -452,47 +442,31 @@ public:
       T->left = t1;
       T->right = t2;
       t1->parent = T;
-      t2->parent = T;
+      if (t2)
+        t2->parent = T;
       return T;
     }
+
     auto Below_res = RightRBJoin(t1->right, t2, k);
-    auto T2 = new node();
-    T2->parent = t1->parent;
-    T2->left = t1->left;
-    T2->key = t1->key;
-    T2->right = Below_res;
-    T2->color = t1->color;
-    Below_res->parent = T2;
-    if (t1->left)
-      t1->left->parent = T2;
+    t1->right = Below_res;
+    if (Below_res)
+      Below_res->parent = t1;
 
-    // two cases of violation is solved this one line when we have
-    if (t1->color == Color::black && T2->right != nullptr &&
-        T2->right->color == Color::red && T2->right->right != nullptr &&
-        T2->right->right->color == Color::red) {
-      T2->right->right->color = Color::black;
-      return subtree_rotation(T2, Direction::LEFT);
+    if (t1->color == Color::black && t1->right != nullptr &&
+        t1->right->color == Color::red && t1->right->right != nullptr &&
+        t1->right->right->color == Color::red) {
+      t1->right->right->color = Color::black;
+      return subtree_rotation(t1, Direction::LEFT);
     }
-    return T2;
+    return t1;
   }
-  node *LeftRBJoin(node *t1, node *t2, int k) {
-    // t1 is larger here
 
-    // 4 cases too look up ...
-    // BB
-    // BR
-    // RB
-    // RR
-    // as per wiki the we can reduce this to something simpler , if t1 is only
-    // black because if you can find a red with a particular height b ehn the
-    // black node above it is the black node we are searchign for , this
-    // bypasses all the complicated Red nodes
-    //
+  node *LeftRBJoin(node *t1, node *t2, int k) {
     if (t2 == nullptr) {
       auto T = new node();
       T->key = k;
-      T->left = t1;       // Attach t1 on the left
-      T->right = nullptr; // Nothing on the right
+      T->left = t1;
+      T->right = nullptr;
       T->color = Color::red;
       if (t1)
         t1->parent = T;
@@ -506,44 +480,42 @@ public:
       T->key = k;
       T->left = t1;
       T->right = t2;
-      t1->parent = T;
+      if (t1)
+        t1->parent = T;
       t2->parent = T;
       return T;
     }
-    auto Below_res = LeftRBJoin(t1, t2->left, k);
-    auto T2 = new node();
-    T2->parent = t2->parent;
-    T2->right = t2->right;
-    T2->key = t2->key;
-    T2->left = Below_res;
-    T2->color = t2->color;
-    Below_res->parent = T2;
-    if (t2->right)
-      t2->right->parent = T2;
 
-    // two cases of violation is solved this one line when we have
-    if (t2->color == Color::black && T2->left != nullptr &&
-        T2->left->color == Color::red && T2->left->left != nullptr &&
-        T2->left->left->color == Color::red) {
-      T2->left->left->color = Color::black;
-      return subtree_rotation(T2, Direction::RIGHT);
+    // Major fix that i made mistake was using entire new nodes , corrupting
+    // existing parent pointers , we fixxed that here , so i am dumb all over
+    // again ig , hwen writing such algos better deal with nulptr or figure out
+    // to drain them early so they don't cause such issues later ...
+    auto Below_res = LeftRBJoin(t1, t2->left, k);
+    t2->left = Below_res;
+    if (Below_res)
+      Below_res->parent = t2;
+
+    if (t2->color == Color::black && t2->left != nullptr &&
+        t2->left->color == Color::red && t2->left->left != nullptr &&
+        t2->left->left->color == Color::red) {
+      t2->left->left->color = Color::black;
+      return subtree_rotation(t2, Direction::RIGHT);
     }
-    return T2;
+    return t2;
   }
 
   node *JoinOP(node *t1, node *t2, int k) {
-
     if (black_height(t1) > black_height(t2)) {
       auto T1 = RightRBJoin(t1, t2, k);
-      if (T1->color == Color::red && T1->right->color == Color::red) {
+      if (T1->color == Color::red && T1->right &&
+          T1->right->color == Color::red) {
         T1->color = Color::black;
       }
       return T1;
-
     } else if (black_height(t1) < black_height(t2)) {
       auto T1 = LeftRBJoin(t1, t2, k);
-      if (T1->color == Color::red && T1->left->color == Color::red) {
-
+      if (T1->color == Color::red && T1->left &&
+          T1->left->color == Color::red) {
         T1->color = Color::black;
       }
       return T1;
@@ -551,11 +523,13 @@ public:
       node *res = new node();
       res->left = t1;
       res->right = t2;
+      res->parent = nullptr; // Reset parent link explicitly
       if (t1)
         t1->parent = res;
       if (t2)
         t2->parent = res;
       res->key = k;
+
       bool t1_black = (t1 == nullptr || t1->color == Color::black);
       bool t2_black = (t2 == nullptr || t2->color == Color::black);
 
@@ -567,21 +541,35 @@ public:
       return res;
     }
   }
+
   std::pair<node *, node *> SplitOP(node *t, int k) {
     if (t == nullptr)
       return {nullptr, nullptr};
-    else if (t->key == k) {
-      t->left->parent = nullptr;
-      t->right->parent = nullptr;
+
+    // FIX: Clean up isolated parent links on split execution
+    if (t->key == k) {
+      if (t->left)
+        t->left->parent = nullptr;
+      if (t->right)
+        t->right->parent = nullptr;
       return {t->left, t->right};
     } else if (t->key > k) {
+      if (t->left)
+        t->left->parent = nullptr; // Isolate child before split
       auto S = SplitOP(t->left, k);
+      if (t->right)
+        t->right->parent = nullptr; // Isolate right branch
       return {S.first, JoinOP(S.second, t->right, t->key)};
     } else {
+      if (t->right)
+        t->right->parent = nullptr;
       auto S = SplitOP(t->right, k);
+      if (t->left)
+        t->left->parent = nullptr;
       return {JoinOP(t->left, S.first, t->key), S.second};
     }
   }
+
   node *unionOP(node *t1, node *t2) {
 
     if (t1 == nullptr)
