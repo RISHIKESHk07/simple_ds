@@ -1006,10 +1006,10 @@ public:
     RedBlackTree left_tree;
     RedBlackTree right_tree;
 
-    for (int i = 1; i <= 10; i++)
+    for (int i = 1; i <= 1000; i++)
       left_tree.insertion(i);
 
-    for (int i = 20; i <= 30; i++)
+    for (int i = 20; i <= 3000; i++)
       right_tree.insertion(i);
 
     validate_tree(left_tree);
@@ -1043,12 +1043,12 @@ public:
 
     RedBlackTree tree;
 
-    for (int i = 1; i <= 20; i++)
+    for (int i = 1; i <= 2000; i++)
       tree.insertion(i);
 
     validate_tree(tree);
 
-    auto res = tree.SplitOP(tree.tree, 10);
+    auto res = tree.SplitOP(tree.tree, 1000);
 
     RedBlackTree left_tree;
     RedBlackTree right_tree;
@@ -1095,10 +1095,10 @@ public:
     RedBlackTree t1;
     RedBlackTree t2;
 
-    for (int i = 1; i <= 20; i += 2)
+    for (int i = 1; i <= 1000; i += 2)
       t1.insertion(i);
 
-    for (int i = 2; i <= 20; i += 2)
+    for (int i = 2; i <= 1010; i += 2)
       t2.insertion(i);
 
     validate_tree(t1);
@@ -1133,7 +1133,7 @@ public:
     std::vector<int> vals1;
     std::vector<int> vals2;
 
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 1000; i++) {
 
       vals1.push_back(i * 2);
       vals2.push_back(i * 2 + 1);
