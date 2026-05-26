@@ -116,11 +116,21 @@ public:
     rearrange_root_on_insertion(search_pos.second, k);
   };
   void deletion(int k) {
+
     auto pos_ser = search(tree, k);
+
+    if (pos_ser.second == nullptr)
+      return;
+
     auto item_it = std::lower_bound(pos_ser.second->keys.begin(),
                                     pos_ser.second->keys.end(), k);
+
+    if (item_it == pos_ser.second->keys.end() || *item_it != k)
+      return;
+
     auto item_index = std::distance(pos_ser.second->keys.begin(), item_it);
-    BNode *start_point;
+
+    BNode *start_point = nullptr;
 
     bool is_leaf = true;
 
@@ -132,141 +142,262 @@ public:
     }
 
     if (is_leaf) {
-      // leaf case
 
       pos_ser.second->keys.erase(item_it);
-      pos_ser.second->vnode.erase(pos_ser.second->vnode.begin() + item_index +
-                                  1);
-      start_point = pos_ser.second->parent;
 
-    } else {
-      // internal node or root
-      if (pos_ser.second->vnode[item_index - 1] != nullptr) {
-        // left tree largest
-        auto X = pos_ser.second->vnode[item_index - 1];
-        while (X->vnode.back() != nullptr) {
+      if (!pos_ser.second->vnode.empty())
+        pos_ser.second->vnode.erase(pos_ser.second->vnode.begin() + item_index +
+                                    1);
+
+      // root became empty
+      if (pos_ser.second == tree && pos_ser.second->keys.empty()) {
+
+        delete tree;
+        tree = nullptr;
+        return;
+      }
+
+      start_point = pos_ser.second;
+    }
+
+    else {
+
+      // predecessor
+      if (item_index > 0 && pos_ser.second->vnode[item_index] != nullptr) {
+
+        auto X = pos_ser.second->vnode[item_index];
+
+        while (!X->vnode.empty() && X->vnode.back() != nullptr) {
           X = X->vnode.back();
         }
-        auto l_lg = X->keys.back();
+
+        int pred = X->keys.back();
+
+        pos_ser.second->keys[item_index] = pred;
+
         X->keys.pop_back();
-        X->vnode.pop_back();
-        start_point = X->parent;
-        pos_ser.second->keys[item_index] = l_lg;
-      } else if (pos_ser.second->vnode[item_index + 1] != nullptr) {
-        // right tree smallest
+
+        if (!X->vnode.empty())
+          X->vnode.pop_back();
+
+        start_point = X;
+      }
+
+      // successor
+      else if (item_index + 1 < pos_ser.second->vnode.size() &&
+               pos_ser.second->vnode[item_index + 1] != nullptr) {
+
         auto X = pos_ser.second->vnode[item_index + 1];
-        while (X->vnode.front() != nullptr) {
+
+        while (!X->vnode.empty() && X->vnode.front() != nullptr) {
           X = X->vnode.front();
         }
-        auto r_sm = X->keys.front();
+
+        int succ = X->keys.front();
+
+        pos_ser.second->keys[item_index] = succ;
+
         X->keys.erase(X->keys.begin());
-        X->vnode.erase(X->vnode.begin());
-        start_point = X->parent;
-        pos_ser.second->keys[item_index] = r_sm;
+
+        if (!X->vnode.empty())
+          X->vnode.erase(X->vnode.begin());
+
+        start_point = X;
       }
     }
-    // rebalance
+
+    int min_keys = (order + 1) / 2 - 1;
 
     auto X = start_point;
+
     while (X != nullptr) {
 
-      if (start_point->keys.size() >= this->order / 2)
+      // root  case where we only have single node
+      if (X == tree) {
+
+        if (X->keys.empty() && !X->vnode.empty()) {
+
+          tree = X->vnode[0];
+
+          if (tree)
+            tree->parent = nullptr;
+
+          delete X;
+        }
+
+        return;
+      }
+
+      // node valid
+      if (X->keys.size() >= min_keys)
+        break;
+
+      auto P = X->parent;
+
+      if (P == nullptr)
         break;
 
       int start_point_index = -1;
 
-      for (int i = 0; i < X->vnode.size(); i++) {
-        if (X->vnode[i] == start_point) {
+      for (int i = 0; i < P->vnode.size(); i++) {
+
+        if (P->vnode[i] == X) {
           start_point_index = i;
           break;
         }
       }
 
-      if (X->vnode[start_point_index - 1] &&
-          X->vnode[start_point_index - 1]->keys.size() > (this->order / 2)) {
-        // right rotate
-        auto l = X->vnode[start_point_index - 1];
-        auto X_org = X->keys[start_point_index - 1];
-        auto def = X->vnode[start_point_index];
+      bool has_left = start_point_index > 0;
 
-        auto l_val = l->keys.back();
-        l->keys.pop_back();
-        l->vnode.pop_back();
+      bool has_right = start_point_index + 1 < P->vnode.size();
 
-        X->keys[start_point_index - 1] = l_val;
+      if (has_left && P->vnode[start_point_index - 1] &&
+          P->vnode[start_point_index - 1]->keys.size() > min_keys) {
 
-        def->keys.insert(def->keys.begin(), X_org);
+        auto l = P->vnode[start_point_index - 1];
+        auto def = P->vnode[start_point_index];
+
+        int sep = P->keys[start_point_index - 1];
+
+        int borrowed = l->keys.back();
+
         auto moved_child = l->vnode.back();
-        l->vnode.pop_back();
 
-        def->vnode.insert(def->vnode.begin(), moved_child);
+        l->keys.pop_back();
 
-        if (moved_child)
-          moved_child->parent = def;
+        if (!l->vnode.empty())
+          l->vnode.pop_back();
 
-      } else if (X->vnode[start_point_index + 1] &&
-                 X->vnode[start_point_index + 1]->keys.size() >
-                     (this->order / 2)) {
-        auto r = X->vnode[start_point_index + 1];
-        auto X_org = X->keys[start_point_index];
-        auto def = X->vnode[start_point_index];
+        P->keys[start_point_index - 1] = borrowed;
 
-        auto r_val = r->keys.front();
-        r->keys.erase(r->keys.begin());
-        r->vnode.erase(r->vnode.begin());
+        def->keys.insert(def->keys.begin(), sep);
 
-        X->keys[start_point_index] = r_val;
+        bool leaf = true;
 
-        def->keys.insert(def->keys.end() - 1, X_org);
+        for (auto c : def->vnode) {
+          if (c != nullptr) {
+            leaf = false;
+            break;
+          }
+        }
+
+        if (leaf) {
+          def->vnode.insert(def->vnode.begin(), nullptr);
+
+        } else {
+
+          def->vnode.insert(def->vnode.begin(), moved_child);
+
+          if (moved_child)
+            moved_child->parent = def;
+        }
+
+        break;
+      }
+
+      else if (has_right && P->vnode[start_point_index + 1] &&
+               P->vnode[start_point_index + 1]->keys.size() > min_keys) {
+
+        auto r = P->vnode[start_point_index + 1];
+        auto def = P->vnode[start_point_index];
+
+        int sep = P->keys[start_point_index];
+
+        int borrowed = r->keys.front();
+
         auto moved_child = r->vnode.front();
-        r->vnode.erase(r->vnode.begin());
 
-        def->vnode.insert(def->vnode.begin(), moved_child);
+        r->keys.erase(r->keys.begin());
 
-        if (moved_child)
-          moved_child->parent = def;
+        if (!r->vnode.empty())
+          r->vnode.erase(r->vnode.begin());
 
-      } else if (X->vnode[start_point_index - 1]->keys.size() <=
-                     (this->order / 2) &&
-                 X->vnode[start_point_index + 1]->keys.size() <=
-                     (this->order / 2)) {
-        // merge case both siblings too small
-        BNode *new_bn_node = new BNode();
-        new_bn_node->keys.insert(new_bn_node->keys.end(),
-                                 X->vnode[start_point_index - 1]->keys.begin(),
-                                 X->vnode[start_point_index - 1]->keys.end());
+        P->keys[start_point_index] = borrowed;
 
-        new_bn_node->keys.push_back(X->keys[start_point_index - 1]);
+        def->keys.push_back(sep);
 
-        new_bn_node->keys.insert(new_bn_node->keys.end(),
-                                 X->vnode[start_point_index]->keys.begin(),
-                                 X->vnode[start_point_index]->keys.end());
+        bool leaf = true;
 
-        new_bn_node->vnode.insert(
-            new_bn_node->vnode.end(),
-            X->vnode[start_point_index - 1]->vnode.begin(),
-            X->vnode[start_point_index - 1]->vnode.end());
+        for (auto c : def->vnode) {
+          if (c != nullptr) {
+            leaf = false;
+            break;
+          }
+        }
 
-        new_bn_node->vnode.insert(new_bn_node->vnode.end(),
-                                  X->vnode[start_point_index]->vnode.begin(),
-                                  X->vnode[start_point_index]->vnode.end());
+        if (leaf) {
+          def->vnode.push_back(nullptr);
 
-        X->keys.erase(X->keys.begin() + start_point_index - 1);
-        X->vnode[start_point_index - 1] = new_bn_node;
-        X->vnode.erase(X->vnode.begin() + start_point_index);
+        } else {
 
-        new_bn_node->parent = X;
+          def->vnode.push_back(moved_child);
+
+          if (moved_child)
+            moved_child->parent = def;
+        }
+
+        break;
       }
 
-      if (X->parent && X->parent->keys.size() == 0) {
-        // case where we reduced the root ....
-        tree = X->vnode[0];
-        tree->parent = nullptr;
-        return;
+      else {
+
+        BNode *left = nullptr;
+        BNode *right = nullptr;
+
+        int sep_index = -1;
+
+        if (has_left) {
+
+          left = P->vnode[start_point_index - 1];
+          right = P->vnode[start_point_index];
+
+          sep_index = start_point_index - 1;
+
+        } else {
+
+          left = P->vnode[start_point_index];
+          right = P->vnode[start_point_index + 1];
+
+          sep_index = start_point_index;
+        }
+
+        BNode *merged = new BNode();
+
+        merged->keys.insert(merged->keys.end(), left->keys.begin(),
+                            left->keys.end());
+
+        merged->keys.push_back(P->keys[sep_index]);
+
+        merged->keys.insert(merged->keys.end(), right->keys.begin(),
+                            right->keys.end());
+
+        merged->vnode.insert(merged->vnode.end(), left->vnode.begin(),
+                             left->vnode.end());
+
+        merged->vnode.insert(merged->vnode.end(), right->vnode.begin(),
+                             right->vnode.end());
+
+        for (auto child : merged->vnode) {
+
+          if (child)
+            child->parent = merged;
+        }
+
+        merged->parent = P;
+
+        P->keys.erase(P->keys.begin() + sep_index);
+
+        P->vnode[sep_index] = merged;
+
+        P->vnode.erase(P->vnode.begin() + sep_index + 1);
+
+        delete left;
+        delete right;
+
+        X = P;
       }
-      X = X->parent;
     }
-  };
+  }
 };
 // --- Testes start here ----
 #include <iostream>
@@ -546,6 +677,322 @@ void test_random_insertions() {
 }
 
 // ========================================
+// DELETE TESTS
+// ========================================
+
+void test_basic_deletions() {
+
+  std::cout << "\n========================\n";
+  std::cout << "BASIC DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  std::vector<int> vals = {10, 20, 5, 6, 12, 30, 7, 17};
+
+  for (auto v : vals)
+    bt.insertion(v);
+
+  print_tree(bt.tree);
+
+  std::vector<int> dels = {6, 7, 5, 10, 12, 17, 20, 30};
+
+  for (auto d : dels) {
+
+    std::cout << "\nDELETE : " << d << "\n";
+
+    bt.deletion(d);
+
+    print_tree(bt.tree);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AFTER DELETE " << d << "\n";
+
+      return;
+    }
+  }
+
+  std::cout << "\nBASIC DELETE TEST PASSED\n";
+}
+
+// ========================================
+// ASCENDING DELETE TEST
+// ========================================
+
+void test_ascending_deletions() {
+
+  std::cout << "\n========================\n";
+  std::cout << "ASCENDING DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  for (int i = 1; i <= 100; i++)
+    bt.insertion(i);
+
+  for (int i = 1; i <= 100; i++) {
+
+    bt.deletion(i);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AT DELETE " << i << "\n";
+
+      print_tree(bt.tree);
+
+      return;
+    }
+  }
+
+  print_tree(bt.tree);
+
+  std::cout << "\nASCENDING DELETE TEST PASSED\n";
+}
+
+// ========================================
+// DESCENDING DELETE TEST
+// ========================================
+
+void test_descending_deletions() {
+
+  std::cout << "\n========================\n";
+  std::cout << "DESCENDING DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  for (int i = 1; i <= 100; i++)
+    bt.insertion(i);
+
+  for (int i = 100; i >= 1; i--) {
+
+    bt.deletion(i);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AT DELETE " << i << "\n";
+
+      print_tree(bt.tree);
+
+      return;
+    }
+  }
+
+  print_tree(bt.tree);
+
+  std::cout << "\nDESCENDING DELETE TEST PASSED\n";
+}
+
+// ========================================
+// INTERNAL NODE DELETE TEST
+// ========================================
+
+void test_internal_deletions() {
+
+  std::cout << "\n========================\n";
+  std::cout << "INTERNAL NODE DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  std::vector<int> vals = {50, 20, 70, 10, 30, 60, 80, 5,
+                           15, 25, 35, 55, 65, 75, 85};
+
+  for (auto v : vals)
+    bt.insertion(v);
+
+  print_tree(bt.tree);
+
+  std::vector<int> dels = {50, 70, 20, 60, 30};
+
+  for (auto d : dels) {
+
+    std::cout << "\nDELETE INTERNAL : " << d << "\n";
+
+    bt.deletion(d);
+
+    print_tree(bt.tree);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AFTER INTERNAL DELETE " << d << "\n";
+
+      return;
+    }
+  }
+
+  std::cout << "\nINTERNAL DELETE TEST PASSED\n";
+}
+
+// ========================================
+// RANDOM DELETE STRESS TEST
+// ========================================
+
+void test_random_deletions() {
+
+  std::cout << "\n========================\n";
+  std::cout << "RANDOM DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  std::vector<int> vals;
+
+  for (int i = 1; i <= 500; i++)
+    vals.push_back(i);
+
+  std::mt19937 rng(42);
+
+  std::shuffle(vals.begin(), vals.end(), rng);
+
+  for (auto v : vals)
+    bt.insertion(v);
+
+  bool ok_insert = validate_tree(bt);
+
+  if (!ok_insert) {
+
+    std::cout << "FAILED AFTER RANDOM INSERT BUILD\n";
+
+    print_tree(bt.tree);
+
+    return;
+  }
+
+  std::shuffle(vals.begin(), vals.end(), rng);
+
+  for (auto v : vals) {
+
+    bt.deletion(v);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AFTER RANDOM DELETE " << v << "\n";
+
+      print_tree(bt.tree);
+
+      return;
+    }
+  }
+
+  print_tree(bt.tree);
+
+  std::cout << "\nRANDOM DELETE TEST PASSED\n";
+}
+
+// ========================================
+// DUPLICATE DELETE TEST
+// ========================================
+
+void test_duplicate_delete_calls() {
+
+  std::cout << "\n========================\n";
+  std::cout << "DUPLICATE DELETE TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  for (int i = 1; i <= 20; i++)
+    bt.insertion(i);
+
+  for (int i = 1; i <= 20; i++) {
+
+    bt.deletion(i);
+
+    bt.deletion(i);
+
+    bt.deletion(i);
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED AFTER DUPLICATE DELETE " << i << "\n";
+
+      print_tree(bt.tree);
+
+      return;
+    }
+  }
+
+  print_tree(bt.tree);
+
+  std::cout << "\nDUPLICATE DELETE TEST PASSED\n";
+}
+
+// ========================================
+// MIXED RANDOM OPS TEST
+// ========================================
+
+void test_mixed_random_operations() {
+
+  std::cout << "\n========================\n";
+  std::cout << "MIXED RANDOM OPS TEST\n";
+  std::cout << "========================\n";
+
+  BTree bt;
+
+  std::mt19937 rng(42);
+
+  std::uniform_int_distribution<int> valdist(1, 1000);
+  std::uniform_int_distribution<int> opdist(0, 1);
+
+  std::set<int> alive;
+
+  for (int i = 0; i < 2000; i++) {
+
+    int val = valdist(rng);
+
+    int op = opdist(rng);
+
+    if (op == 0) {
+
+      bt.insertion(val);
+
+      alive.insert(val);
+
+    } else {
+
+      bt.deletion(val);
+
+      alive.erase(val);
+    }
+
+    bool ok = validate_tree(bt);
+
+    if (!ok) {
+
+      std::cout << "FAILED DURING MIXED OPS\n";
+
+      std::cout << "iteration : " << i << "\n";
+
+      std::cout << "value : " << val << "\n";
+
+      std::cout << "op : " << (op == 0 ? "insert" : "delete") << "\n";
+
+      print_tree(bt.tree);
+
+      return;
+    }
+  }
+
+  print_tree(bt.tree);
+
+  std::cout << "\nMIXED RANDOM OPS TEST PASSED\n";
+}
+
+// ========================================
 // MAIN
 // ========================================
 
@@ -558,6 +1005,20 @@ int main() {
   test_descending_insertions();
 
   test_random_insertions();
+
+  test_basic_deletions();
+
+  test_ascending_deletions();
+
+  test_descending_deletions();
+
+  test_internal_deletions();
+
+  test_random_deletions();
+
+  test_duplicate_delete_calls();
+
+  test_mixed_random_operations();
 
   return 0;
 }
