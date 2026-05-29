@@ -75,7 +75,7 @@ public:
       right_node->keys.assign(tr->keys.begin() + median_index + 1,
                               tr->keys.end());
       right_node->vnode.assign(tr->vnode.begin() + median_index + 1,
-                               tr->vnode.end());
+        tr->vnode.end());
 
       for (auto *child : right_node->vnode) {
         if (child)
