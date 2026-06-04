@@ -195,7 +195,17 @@ public:
       // root  case where we only have single node
       if (X == tree) {
 
-        if (X->keys.empty() && !X->vnode.empty()) {
+        if (X->isLeaf) {
+
+          if (X->keys.empty()) {
+            delete X;
+            tree = nullptr;
+          }
+
+          return;
+        }
+
+        if (X->keys.empty()) {
 
           tree = X->vnode[0];
 
@@ -251,14 +261,14 @@ public:
       // left rotate for left sibling greater , break after
       else if (r && r->keys.size() > min_keys) {
 
-        auto sep = X->keys[cur_pos_index];
+        auto sep = P->keys[cur_pos_index];
         auto brower_key = r->keys.front();
         auto brower_child = r->vnode.front();
 
         if (X->isLeaf) {
           X->keys.push_back(brower_key);
           X->vnode.push_back(nullptr);
-          P->keys[cur_pos_index] = X->keys[0];
+          P->keys[cur_pos_index] = r->keys[0];
           r->keys.erase(r->keys.begin());
         } else {
           r->keys.erase(r->keys.begin());
@@ -841,11 +851,12 @@ void BPlusTreeTests::test_delete_random() {
 
     T.insertion(i);
   }
+  print_tree(T);
 
   // random_shuffle(vals.begin(), vals.end());
 
   for (auto x : vals) {
-
+    std::cout << x << std::endl;
     T.deletion(x);
 
     assert(T.search(T.tree, x).first == -1);
@@ -865,7 +876,7 @@ void BPlusTreeTests::test_delete_root_shrink() {
   for (int i = 1; i <= 20; i++)
     T.insertion(i);
 
-  for (int i = 1; i <= 19; i++) {
+  for (int i = 1; i <= 20; i++) {
 
     T.deletion(i);
 
@@ -901,7 +912,9 @@ void BPlusTreeTests::test_range_lookup() {
   assert(T.search(T.tree, 10).first == -1);
   validate_all(T);
 
-  auto vec = T.range_lookup({12, 21}); // 21 does not exist here so we should not break but give the last value possible ..
+  auto vec =
+      T.range_lookup({12, 21}); // 21 does not exist here so we should not break
+                                // but give the last value possible ..
 
   for (auto x : vec) {
     std::cout << YELLOW << x << "--";
