@@ -996,29 +996,29 @@ void test_mixed_random_operations() {
 // MAIN
 // ========================================
 
-int main() {
-
-  test_basic_insertions();
-
-  test_ascending_insertions();
-
-  test_descending_insertions();
-
-  test_random_insertions();
-
-  test_basic_deletions();
-
-  test_ascending_deletions();
-
-  test_descending_deletions();
-
-  test_internal_deletions();
-
-  test_random_deletions();
-
-  test_duplicate_delete_calls();
-
-  test_mixed_random_operations();
-
-  return 0;
-}
+// int main() {
+//
+//   test_basic_insertions();
+//
+//   test_ascending_insertions();
+//
+//   test_descending_insertions();
+//
+//   test_random_insertions();
+//
+//   test_basic_deletions();
+//
+//   test_ascending_deletions();
+//
+//   test_descending_deletions();
+//
+//   test_internal_deletions();
+//
+//   test_random_deletions();
+//
+//   test_duplicate_delete_calls();
+//
+//   test_mixed_random_operations();
+//
+//   return 0;
+// }

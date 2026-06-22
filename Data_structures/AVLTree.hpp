@@ -211,13 +211,16 @@ public:
   };
 };
 
+#include "../v1/IN-MEM_DB_key_spec.hpp"
 #include <algorithm>
 #include <cassert>
 #include <climits>
 #include <random>
 
+template <typename KeyType, typename ValueType,
+          typename Comparator = DBKeyComparator>
 class AVLtree {
-
+  Comparator cmp;
   /*
     AVL TREE
     --------
@@ -235,9 +238,11 @@ class AVLtree {
   */
 
   typedef struct node {
-    int key;
+    KeyType key;
+    ValueType val;
     node *left;
     node *right;
+    node(KeyType &k, ValueType &v) : key(k), val(v) {}
   } node;
 
 public:
@@ -253,17 +258,17 @@ public:
   // SEARCH
   // ============================================================
 
-  std::pair<node *, node *> search_internal(int k, node *tree,
+  std::pair<node *, node *> search_internal(KeyType k, node *tree,
                                             node *current_ptr = nullptr,
                                             node *parent_ptr = nullptr) {
 
     if (tree == nullptr)
       return {current_ptr, parent_ptr};
 
-    if (tree->key == k)
+    if (cmp(tree->key, k) == 0)
       return {current_ptr, parent_ptr};
 
-    else if (tree->key > k)
+    else if (cmp(tree->key, k) == -1)
       return search_internal(k, tree->left, tree->left, tree);
 
     else
@@ -366,7 +371,7 @@ public:
   // INSERTION
   // ============================================================
 
-  void insertion(int k) {
+  void insertion(KeyType k, ValueType v) {
 
     auto pos = search(k, tree);
 
@@ -374,9 +379,7 @@ public:
 
     if (pos.second == nullptr) {
 
-      node *temp = new node();
-
-      temp->key = k;
+      node *temp = new node(k, v);
       temp->left = nullptr;
       temp->right = nullptr;
 
@@ -387,13 +390,12 @@ public:
       return;
     }
 
-    node *new_incoming = new node();
+    node *new_incoming = new node(k, v);
 
-    new_incoming->key = k;
     new_incoming->left = nullptr;
     new_incoming->right = nullptr;
 
-    if (pos.second->key < k)
+    if (cmp(pos.second->key, k) == -1)
       pos.second->right = new_incoming;
     else
       pos.second->left = new_incoming;
@@ -412,7 +414,7 @@ public:
           (pos3.second != nullptr && pos3.second->left == pos3.first);
       // RIGHT SIDE INSERTION
 
-      if (X->right && X->right->key == Z->key) {
+      if (X->right && cmp(X->right->key, Z->key) == 0) {
 
         if (heightb[X] > 0) {
 
@@ -441,7 +443,7 @@ public:
 
       // LEFT SIDE INSERTION
 
-      else if (X->left && X->left->key == Z->key) {
+      else if (X->left && cmp(X->left->key, Z->key) == 0) {
 
         if (heightb[X] < 0) {
 
@@ -545,7 +547,7 @@ public:
   // returns:
   // first  -> rebalance start node
   // second -> subtree that became shorter
-  std::pair<node *, node *> bst_delete(int k) {
+  std::pair<node *, node *> bst_delete(KeyType k) {
 
     auto u_pos = search(k, tree);
 
@@ -641,7 +643,7 @@ public:
   // DELETE
   // ============================================================
 
-  void deletion(int k) {
+  void deletion(KeyType k) {
 
     auto del_info = bst_delete(k);
 
@@ -788,49 +790,46 @@ public:
   // RIGHT AVL JOIN
   // ============================================================
 
-  node *RightAVl(node *LT, node *RT, int k) {
+  node *RightAVl(node *LT, node *RT, KeyType k, ValueType v) {
 
     auto LT_subl = LT->left;
     auto C = LT->right;
     auto k_ = LT->key;
+    auto v_ = LT->val;
 
     if (heightOp(C) <= heightOp(RT) + 1) {
 
-      auto T__ = new node();
+      auto T__ = new node(k, v);
 
       T__->left = C;
       T__->right = RT;
-      T__->key = k;
 
       if (heightOp(LT_subl) + 1 >= heightOp(T__)) {
 
-        node *m_node = new node();
+        node *m_node = new node(k_, v_);
 
         m_node->left = LT_subl;
         m_node->right = T__;
-        m_node->key = k_;
 
         return m_node;
 
       } else {
 
-        node *n_node = new node();
+        node *n_node = new node(k_, v_);
 
         n_node->left = LT_subl;
         n_node->right = T__;
-        n_node->key = k_;
 
         return left_right_rotate(n_node, n_node->right);
       }
     }
 
-    auto T_ = RightAVl(C, RT, k);
+    auto T_ = RightAVl(C, RT, k, v);
 
-    node *m_node = new node();
+    node *m_node = new node(k_, v_);
 
     m_node->left = LT_subl;
     m_node->right = T_;
-    m_node->key = k_;
 
     if (heightOp(LT->left) <= heightOp(T_) + 1) {
 
@@ -846,25 +845,24 @@ public:
   // LEFT AVL JOIN
   // ============================================================
 
-  node *LeftAVL(node *LT, node *RT, int k) {
+  node *LeftAVL(node *LT, node *RT, KeyType k, ValueType v) {
 
     auto RT_subr = RT->right;
     auto C = RT->left;
     auto k_ = RT->key;
+    auto v_ = RT->key;
 
     if (heightOp(C) <= heightOp(LT) + 1) {
 
-      auto T__ = new node();
+      auto T__ = new node(k, v);
 
       T__->left = LT;
       T__->right = C;
-      T__->key = k;
 
-      node *m_node = new node();
+      node *m_node = new node(k_, v_);
 
       m_node->left = T__;
       m_node->right = RT_subr;
-      m_node->key = k_;
 
       if (heightOp(RT_subr) + 1 >= heightOp(T__)) {
 
@@ -876,13 +874,12 @@ public:
       }
     }
 
-    auto T_ = LeftAVL(LT, C, k);
+    auto T_ = LeftAVL(LT, C, k, v);
 
-    node *mn_node = new node();
+    node *mn_node = new node(k_, v_);
 
     mn_node->left = T_;
     mn_node->right = RT_subr;
-    mn_node->key = k_;
 
     if (heightOp(RT_subr) + 1 >= heightOp(T_))
       return mn_node;
@@ -894,28 +891,27 @@ public:
   // JOIN OPERATION
   // ============================================================
 
-  node *JoingOp(node *LT, node *RT, int k) {
+  node *JoingOp(node *LT, node *RT, KeyType k, ValueType v) {
 
     node *result = nullptr;
 
     if (heightOp(LT) == heightOp(RT)) {
 
-      node *new_tree = new node();
+      node *new_tree = new node(k, v);
 
       new_tree->left = LT;
       new_tree->right = RT;
-      new_tree->key = k;
 
       result = new_tree;
     }
 
     else if (heightOp(LT) > heightOp(RT)) {
 
-      result = RightAVl(LT, RT, k);
+      result = RightAVl(LT, RT, k, v);
 
     } else {
 
-      result = LeftAVL(LT, RT, k);
+      result = LeftAVL(LT, RT, k, v);
     }
 
     // ========================================================
@@ -927,10 +923,10 @@ public:
     return result;
   }
 
-  std::pair<node *, node *> SplitTrees(node *t, int k) {
+  std::pair<node *, node *> SplitTrees(node *t, KeyType k) {
     if (t == nullptr)
       return {nullptr, nullptr};
-    if (t->key == k) {
+    if (cmp(t->key, k) == 0) {
 
       auto L = t->left;
       auto R = t->right;
@@ -942,12 +938,12 @@ public:
       recomputeBF(R);
 
       return {L, R};
-    } else if (t->key > k) {
+    } else if (cmp(t->key, k) == -1) {
       auto temp = SplitTrees(t->left, k);
-      return {temp.first, JoingOp(temp.second, t->right, t->key)};
+      return {temp.first, JoingOp(temp.second, t->right, t->key, t->val)};
     } else {
       auto temp = SplitTrees(t->right, k);
-      return {JoingOp(t->left, temp.first, t->key),
+      return {JoingOp(t->left, temp.first, t->key, t->val),
               temp.second}; // here as we go up you see that t->left denotes
                             // values smaller as we build from bottom to up
     }
@@ -961,7 +957,7 @@ public:
     else {
       auto temp = SplitTrees(t2, t1->key);
       return JoingOp(UnionTrees(temp.first, t1->left),
-                     UnionTrees(temp.second, t1->right), t1->key);
+                     UnionTrees(temp.second, t1->right), t1->key, t1->val);
     }
   }
 
@@ -1090,6 +1086,17 @@ class Tester {
 
 public:
   Tester() { std::cout << "Starting AVL Tests\n"; }
+  struct IntComparator {
+    // Returns: -1 if a < b, 0 if a == b, 1 if a > b
+    int operator()(const int &a, const int &b) const {
+      if (a == b)
+        return 0;
+      else if (a < b)
+        return -1;
+      else
+        return 1;
+    }
+  };
 
   // ============================================================
   // RR ROTATION
@@ -1099,15 +1106,15 @@ public:
 
     std::cout << "\n===== RR TEST =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
-    t.insertion(1);
+    t.insertion(1, 0);
     t.assertCorrect();
 
-    t.insertion(2);
+    t.insertion(2, 0);
     t.assertCorrect();
 
-    t.insertion(3);
+    t.insertion(3, 0);
     t.assertCorrect();
 
     t.printTree();
@@ -1129,15 +1136,15 @@ public:
 
     std::cout << "\n===== LL TEST =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
-    t.insertion(3);
+    t.insertion(3, 0);
     t.assertCorrect();
 
-    t.insertion(2);
+    t.insertion(2, 0);
     t.assertCorrect();
 
-    t.insertion(1);
+    t.insertion(1, 0);
     t.assertCorrect();
 
     t.printTree();
@@ -1159,15 +1166,15 @@ public:
 
     std::cout << "\n===== LR TEST =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
-    t.insertion(3);
+    t.insertion(3, 0);
     t.assertCorrect();
 
-    t.insertion(1);
+    t.insertion(1, 0);
     t.assertCorrect();
 
-    t.insertion(2);
+    t.insertion(2, 0);
     t.assertCorrect();
 
     t.printTree();
@@ -1189,15 +1196,15 @@ public:
 
     std::cout << "\n===== RL TEST =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
-    t.insertion(1);
+    t.insertion(1, 0);
     t.assertCorrect();
 
-    t.insertion(3);
+    t.insertion(3, 0);
     t.assertCorrect();
 
-    t.insertion(2);
+    t.insertion(2, 0);
     t.assertCorrect();
 
     t.printTree();
@@ -1219,7 +1226,7 @@ public:
 
     std::cout << "\n===== RANDOMIZED TEST =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     std::vector<int> vals;
 
@@ -1235,7 +1242,7 @@ public:
     for (auto v : vals) {
 
       std::cout << v << std::endl;
-      t.insertion(v);
+      t.insertion(v, 0);
 
       t.assertCorrect();
     }
@@ -1262,19 +1269,19 @@ public:
 
     std::cout << "\n===== JOIN EQUAL HEIGHT =====\n";
 
-    AVLtree t;
-    AVLtree t1;
-    AVLtree t2;
+    AVLtree<int, int, IntComparator> t;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
 
-    t1.insertion(2);
-    t1.insertion(1);
-    t1.insertion(3);
+    t1.insertion(2, 0);
+    t1.insertion(1, 0);
+    t1.insertion(3, 0);
 
-    t2.insertion(8);
-    t2.insertion(7);
-    t2.insertion(9);
+    t2.insertion(8, 0);
+    t2.insertion(7, 0);
+    t2.insertion(9, 0);
 
-    t.tree = t.JoingOp(t1.tree, t2.tree, 5);
+    t.tree = t.JoingOp(t1.tree, t2.tree, 5, 0);
 
     t.printTree();
     t.assertCorrect();
@@ -1288,19 +1295,19 @@ public:
 
     std::cout << "\n===== JOIN LEFT HEAVY =====\n";
 
-    AVLtree leftTree;
+    AVLtree<int, int, IntComparator> leftTree;
 
     for (int i = 1; i <= 5; i++)
-      leftTree.insertion(i);
+      leftTree.insertion(i, 0);
 
-    AVLtree rightTree;
+    AVLtree<int, int, IntComparator> rightTree;
 
-    rightTree.insertion(100);
-    rightTree.insertion(101);
+    rightTree.insertion(100, 0);
+    rightTree.insertion(101, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
-    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50, 0);
 
     finalT.printTree();
     finalT.assertCorrect();
@@ -1314,19 +1321,19 @@ public:
 
     std::cout << "\n===== JOIN RIGHT HEAVY =====\n";
 
-    AVLtree leftTree;
+    AVLtree<int, int, IntComparator> leftTree;
 
-    leftTree.insertion(1);
-    leftTree.insertion(2);
+    leftTree.insertion(1, 0);
+    leftTree.insertion(2, 0);
 
-    AVLtree rightTree;
+    AVLtree<int, int, IntComparator> rightTree;
 
     for (int i = 100; i <= 105; i++)
-      rightTree.insertion(i);
+      rightTree.insertion(i, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
-    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50, 0);
 
     finalT.printTree();
     finalT.assertCorrect();
@@ -1340,18 +1347,18 @@ public:
 
     std::cout << "\n===== DEEP RECURSIVE JOIN =====\n";
 
-    AVLtree leftTree;
-    AVLtree rightTree;
+    AVLtree<int, int, IntComparator> leftTree;
+    AVLtree<int, int, IntComparator> rightTree;
 
     for (int i = 1; i <= 5; i++)
-      leftTree.insertion(i);
+      leftTree.insertion(i, 0);
 
     for (int i = 7; i <= 10; i++)
-      rightTree.insertion(i);
+      rightTree.insertion(i, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
-    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 6);
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 6, 0);
 
     finalT.printTree();
     finalT.assertCorrect();
@@ -1365,21 +1372,21 @@ public:
 
     std::cout << "\n===== JOIN ROTATION TRIGGER =====\n";
 
-    AVLtree leftTree;
+    AVLtree<int, int, IntComparator> leftTree;
 
-    leftTree.insertion(1);
-    leftTree.insertion(2);
-    leftTree.insertion(3);
-    leftTree.insertion(4);
-    leftTree.insertion(5);
+    leftTree.insertion(1, 0);
+    leftTree.insertion(2, 0);
+    leftTree.insertion(3, 0);
+    leftTree.insertion(4, 0);
+    leftTree.insertion(5, 0);
 
-    AVLtree rightTree;
+    AVLtree<int, int, IntComparator> rightTree;
 
-    rightTree.insertion(100);
+    rightTree.insertion(100, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
-    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50);
+    finalT.tree = finalT.JoingOp(leftTree.tree, rightTree.tree, 50, 0);
 
     finalT.printTree();
     finalT.assertCorrect();
@@ -1392,12 +1399,12 @@ public:
   void testSingleNodeJoin() {
 
     std::cout << "\n===== SINGLE NODE JOIN =====\n";
-    AVLtree t;
-    AVLtree t1;
-    AVLtree t2;
-    t1.insertion(1);
-    t2.insertion(3);
-    t.tree = t.JoingOp(t1.tree, t2.tree, 2);
+    AVLtree<int, int, IntComparator> t;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
+    t1.insertion(1, 0);
+    t2.insertion(3, 0);
+    t.tree = t.JoingOp(t1.tree, t2.tree, 2, 0);
 
     t.printTree();
     t.assertCorrect();
@@ -1413,18 +1420,18 @@ public:
 
     std::cout << "\n===== SPLIT MIDDLE =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     for (int i = 1; i <= 15; i++)
-      t.insertion(i);
+      t.insertion(i, 0);
 
     std::cout << "\nORIGINAL TREE\n";
     t.printTree();
 
     auto res = t.SplitTrees(t.tree, 8);
 
-    AVLtree leftT;
-    AVLtree rightT;
+    AVLtree<int, int, IntComparator> leftT;
+    AVLtree<int, int, IntComparator> rightT;
 
     leftT.tree = res.first;
     rightT.tree = res.second;
@@ -1447,15 +1454,15 @@ public:
 
     std::cout << "\n===== SPLIT LEAF =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     for (int i = 1; i <= 10; i++)
-      t.insertion(i);
+      t.insertion(i, 0);
 
     auto res = t.SplitTrees(t.tree, 1);
 
-    AVLtree leftT;
-    AVLtree rightT;
+    AVLtree<int, int, IntComparator> leftT;
+    AVLtree<int, int, IntComparator> rightT;
 
     leftT.tree = res.first;
     rightT.tree = res.second;
@@ -1481,18 +1488,18 @@ public:
 
     std::cout << "\n===== SPLIT ROOT =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     for (int i = 1; i <= 7; i++)
-      t.insertion(i);
+      t.insertion(i, 0);
 
     std::cout << "\nORIGINAL TREE\n";
     t.printTree();
 
     auto res = t.SplitTrees(t.tree, 4);
 
-    AVLtree leftT;
-    AVLtree rightT;
+    AVLtree<int, int, IntComparator> leftT;
+    AVLtree<int, int, IntComparator> rightT;
 
     leftT.tree = res.first;
     rightT.tree = res.second;
@@ -1518,15 +1525,15 @@ public:
 
     std::cout << "\n===== SPLIT DEEP =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     for (int i = 1; i <= 100; i++)
-      t.insertion(i);
+      t.insertion(i, 0);
 
     auto res = t.SplitTrees(t.tree, 57);
 
-    AVLtree leftT;
-    AVLtree rightT;
+    AVLtree<int, int, IntComparator> leftT;
+    AVLtree<int, int, IntComparator> rightT;
 
     leftT.tree = res.first;
     rightT.tree = res.second;
@@ -1552,16 +1559,16 @@ public:
 
     std::cout << "\n===== UNION SIMPLE =====\n";
 
-    AVLtree t1;
-    AVLtree t2;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
 
     for (int i = 1; i <= 5; i++)
-      t1.insertion(i);
+      t1.insertion(i, 0);
 
     for (int i = 100; i <= 105; i++)
-      t2.insertion(i);
+      t2.insertion(i, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
     finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
     finalT.recomputeBF(finalT.tree);
@@ -1579,21 +1586,21 @@ public:
 
     std::cout << "\n===== UNION INTERLEAVED =====\n";
 
-    AVLtree t1;
-    AVLtree t2;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
 
-    t1.insertion(10);
-    t1.insertion(20);
-    t1.insertion(30);
-    t1.insertion(40);
+    t1.insertion(10, 0);
+    t1.insertion(20, 0);
+    t1.insertion(30, 0);
+    t1.insertion(40, 0);
 
-    t2.insertion(5);
-    t2.insertion(15);
-    t2.insertion(25);
-    t2.insertion(35);
-    t2.insertion(45);
+    t2.insertion(5, 0);
+    t2.insertion(15, 0);
+    t2.insertion(25, 0);
+    t2.insertion(35, 0);
+    t2.insertion(45, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
     finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
     finalT.recomputeBF(finalT.tree);
@@ -1611,16 +1618,16 @@ public:
 
     std::cout << "\n===== UNION LARGE =====\n";
 
-    AVLtree t1;
-    AVLtree t2;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
 
     for (int i = 1; i <= 100; i += 2)
-      t1.insertion(i);
+      t1.insertion(i, 0);
 
     for (int i = 2; i <= 100; i += 2)
-      t2.insertion(i);
+      t2.insertion(i, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
     finalT.tree = finalT.UnionTrees(t1.tree, t2.tree);
 
@@ -1639,13 +1646,13 @@ public:
 
     std::cout << "\n===== UNION EMPTY =====\n";
 
-    AVLtree t1;
-    AVLtree t2;
+    AVLtree<int, int, IntComparator> t1;
+    AVLtree<int, int, IntComparator> t2;
 
     for (int i = 1; i <= 10; i++)
-      t1.insertion(i);
+      t1.insertion(i, 0);
 
-    AVLtree finalT;
+    AVLtree<int, int, IntComparator> finalT;
 
     finalT.tree = finalT.UnionTrees(t1.tree, nullptr);
 
@@ -1664,14 +1671,14 @@ public:
 
     std::cout << "\n===== SPLIT THEN UNION =====\n";
 
-    AVLtree t;
+    AVLtree<int, int, IntComparator> t;
 
     for (int i = 1; i <= 50; i++)
-      t.insertion(i);
+      t.insertion(i, 0);
 
     auto res = t.SplitTrees(t.tree, 25);
 
-    AVLtree rebuilt;
+    AVLtree<int, int, IntComparator> rebuilt;
 
     rebuilt.tree = rebuilt.UnionTrees(res.first, res.second);
 
@@ -1724,52 +1731,52 @@ public:
 // ============================================================
 // MAIN
 // ============================================================
-int main() {
-  // ------------------------------------------------ //
-  // BST ..
-  // BST *bst = new BST();
-  //
-  // // The BST starts with: 44, 17, 88, 32, 65, 97, 28, 54, 82, 29, 76, 80,
-  // 78
-  // // Note: Your constructor already calls removal_node(32).
-  //
-  // std::cout << "\n--- Starting Additional Tests ---" << std::endl;
-  //
-  // // Test 1: Remove a Leaf Node (No children)
-  // // 29 is a leaf (child of 28).
-  // std::cout << "\nTest 1: Removing Leaf 29" << std::endl;
-  // bst->removal_node(29);
-  // // Result: 28's right child should now be nullptr.
-  //
-  // // Test 2: Remove a node with One Child
-  // // 82 has one child (76) after the internal removals in your BST.
-  // // Wait, let's pick 97 (leaf) or 88 (two children).
-  // // Let's try 54 (child of 65).
-  // std::cout << "\nTest 2: Removing Node 54 (One Child/Leaf)" << std::endl;
-  // bst->removal_node(54);
-  //
-  // // Test 3: Remove a node with Two Children
-  // // 88 has children 65 and 97.
-  // std::cout << "\nTest 3: Removing Node 88 (Two Children)" << std::endl;
-  // bst->removal_node(88);
-  // // Result: Successor (97 or 82) should move up.
-  //
-  // // Test 4: Removing the Root (TRICKY)
-  // // 44 is the root.
-  // std::cout << "\nTest 4: Removing Root 44" << std::endl;
-  // bst->removal_node(44);
-  // // Result: If pos[0].second is null, your code might crash here!
-  // // Check if pos[0].second exists before accessing .key.
-  //
-  // // Test 5: Non-existent element
-  // std::cout << "\nTest 5: Removing 999 (Doesn't exist)" << std::endl;
-  // bst->removal_node(999);
-  // Result: Should print "Element does not exit"
+// int main() {
+// ------------------------------------------------ //
+// BST ..
+// BST *bst = new BST();
+//
+// // The BST starts with: 44, 17, 88, 32, 65, 97, 28, 54, 82, 29, 76, 80,
+// 78
+// // Note: Your constructor already calls removal_node(32).
+//
+// std::cout << "\n--- Starting Additional Tests ---" << std::endl;
+//
+// // Test 1: Remove a Leaf Node (No children)
+// // 29 is a leaf (child of 28).
+// std::cout << "\nTest 1: Removing Leaf 29" << std::endl;
+// bst->removal_node(29);
+// // Result: 28's right child should now be nullptr.
+//
+// // Test 2: Remove a node with One Child
+// // 82 has one child (76) after the internal removals in your BST.
+// // Wait, let's pick 97 (leaf) or 88 (two children).
+// // Let's try 54 (child of 65).
+// std::cout << "\nTest 2: Removing Node 54 (One Child/Leaf)" << std::endl;
+// bst->removal_node(54);
+//
+// // Test 3: Remove a node with Two Children
+// // 88 has children 65 and 97.
+// std::cout << "\nTest 3: Removing Node 88 (Two Children)" << std::endl;
+// bst->removal_node(88);
+// // Result: Successor (97 or 82) should move up.
+//
+// // Test 4: Removing the Root (TRICKY)
+// // 44 is the root.
+// std::cout << "\nTest 4: Removing Root 44" << std::endl;
+// bst->removal_node(44);
+// // Result: If pos[0].second is null, your code might crash here!
+// // Check if pos[0].second exists before accessing .key.
+//
+// // Test 5: Non-existent element
+// std::cout << "\nTest 5: Removing 999 (Doesn't exist)" << std::endl;
+// bst->removal_node(999);
+// Result: Should print "Element does not exit"
 
-  // -------------------------------------
-  // AVL trees ..
-  auto t = new Tester();
-  t->runAllTests();
-  // -----------------------------------------
-  return 0;
-}
+// -------------------------------------
+// AVL trees ..
+//   auto t = new Tester();
+//   t->runAllTests();
+//   // -----------------------------------------
+//   return 0;
+// }

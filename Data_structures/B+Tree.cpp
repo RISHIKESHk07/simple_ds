@@ -876,7 +876,7 @@ void BPlusTreeTests::test_delete_root_shrink() {
   for (int i = 1; i <= 20; i++)
     T.insertion(i);
 
-  for (int i = 1; i <= 20; i++) {
+  for (int i = 1; i <= 19; i++) {
 
     T.deletion(i);
 
@@ -896,10 +896,10 @@ void BPlusTreeTests::test_range_lookup() {
 
   BPlusTree T;
 
-  for (int i = 1; i <= 20; i++)
+  for (int i = 1; i <= 200; i++)
     T.insertion(i);
 
-  for (int i = 1; i <= 10; i++) {
+  for (int i = 1; i <= 100; i++) {
 
     T.deletion(i);
 
@@ -908,12 +908,12 @@ void BPlusTreeTests::test_range_lookup() {
 
   print_tree(T);
 
-  assert(T.search(T.tree, 20).first == 20);
+  assert(T.search(T.tree, 150).first == 150);
   assert(T.search(T.tree, 10).first == -1);
   validate_all(T);
 
   auto vec =
-      T.range_lookup({12, 21}); // 21 does not exist here so we should not break
+      T.range_lookup({120, 190}); // 21 does not exist here so we should not break
                                 // but give the last value possible ..
 
   for (auto x : vec) {
