@@ -217,8 +217,7 @@ public:
 #include <climits>
 #include <random>
 
-template <typename KeyType, typename ValueType,
-          typename Comparator = DBKeyComparator>
+template <typename KeyType, typename ValueType, typename Comparator>
 class AVLtree {
   Comparator cmp;
   /*
@@ -275,7 +274,7 @@ public:
       return search_internal(k, tree->right, tree->right, tree);
   }
 
-  std::pair<node *, node *> search(int k, node *tree_acc) {
+  std::pair<node *, node *> search(KeyType k, node *tree_acc) {
     return search_internal(k, tree_acc, tree, nullptr);
   }
 
@@ -960,6 +959,51 @@ public:
                      UnionTrees(temp.second, t1->right), t1->key, t1->val);
     }
   }
+  std::vector<node *> flatten_tree(node *tree, std::vector<node *> res) {
+    if (tree == nullptr) {
+      return;
+    } else {
+      flatten_tree(tree->left);
+      res.push_back(tree);
+      flatten_tree(tree->right);
+    }
+  }
+
+  std::vector<std::pair<std::string, std::string>> inorder_full_traversal() {
+    std::vector<node *> vec;
+    std::vector<std::pair<std::string, std::string>> res;
+    auto v = flatten_tree(tree, vec);
+    for (auto i : v) {
+      res.push_back({i.key, i.val});
+    }
+    return res;
+  }
+
+  std::vector<std::pair<std::string, std::string>>
+  inorder_range_traversal(KeyType k1, KeyType k2) {
+    auto n1 = search(k1, tree);
+    auto n2 = search(k2, tree);
+    if (n1.first == nullptr || n2.first == nullptr) {
+    }
+    std::vector<std::pair<std::string, std::string>> res;
+
+    while (n1 != n2) {
+      res.push_back({n1.first.key, n1.first.val});
+      n1 = bst_succesor(n1);
+    }
+
+    res.push_back({n2.first.key, n2.first.val});
+
+    return res;
+  }
+
+  int size_of_tree() {
+    std::vector<node *> in_order;
+    flatten_tree(tree, in_order);
+    if (in_order.size() == 0)
+      return -1;
+    return in_order.size();
+  };
 
   // ============================================================
   // TREE PRINTER
