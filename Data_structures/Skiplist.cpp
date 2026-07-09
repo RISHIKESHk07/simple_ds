@@ -18,7 +18,7 @@ public:
     node *right;
     node *up;
     node *left;
-    int right_skip_gap = 1;
+    int right_skip_gap = 0;
     node *down;
     bool is_head = 0;
     bool is_head_start = 0;
@@ -160,7 +160,6 @@ public:
     new_n->v = v_ins;
     new_n->down = nullptr;
     new_n->up = nullptr;
-    new_n->right_skip_gap = 1;
 
     if (pred_addition_node->right != nullptr) {
       succ_addition_node = pred_addition_node->right;
@@ -177,6 +176,12 @@ public:
     while (temp != nullptr) {
       left_span_length += temp->right_skip_gap;
       temp = temp->left;
+    }
+    // new insertion on bottom layer ... if succesor does not exist
+    if (succ_addition_node) {
+      new_n->right_skip_gap = 1;
+    } else {
+      new_n->right_skip_gap = 0;
     }
 
     length_skiplist += 1;
@@ -243,12 +248,14 @@ public:
     }
     auto old_height = height_skiplist;
     height_skiplist = std::max(new_node_height, height_skiplist);
-    int i;
-    if (new_node_height < old_height)
-      i = s.second.size() - 1 - (old_height - new_node_height) - 1;
-    else
-      i = s.second.size() - 1;
-    for (; i >= 0; i--) {
+    int r;
+    if (new_node_height < old_height) {
+      r = old_height - new_node_height;
+    } else {
+      r = 0;
+    }
+
+    for (int i = r; i <= static_cast<int>(s.second.size()) - 1; i++) {
       auto pred_addition_node2 = s.second[i];
       node *succ_addition_node2 = nullptr;
       auto new_n2 = new node();
@@ -257,9 +264,11 @@ public:
       new_n2->k = k_ins;
       new_n2->v = v_ins;
       new_n2->up = prev_bottom;
-      new_n2->right_skip_gap = pred_addition_node2->right_skip_gap;
+      new_n2->right_skip_gap = (pred_addition_node2->right_skip_gap > 1)
+                                   ? pred_addition_node2->right_skip_gap - 1
+                                   : 1;
       if (prev_bottom != nullptr)
-        prev_bottom->down = new_n;
+        prev_bottom->down = new_n2;
       if (pred_addition_node2->right != nullptr) {
         succ_addition_node2 = pred_addition_node2->right;
         succ_addition_node2->left = new_n2;
