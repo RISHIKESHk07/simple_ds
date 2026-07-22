@@ -2,36 +2,91 @@
 
 ## Introduction
 
-Hello their this is my impl of a data store for another project (simple webserver) , mainly for session and mangement and to act as a Cache backend with lsm tree storage engine , so thats the short explanation why this project is going to take a good time to impl , mainly that i am writing all possible tree impls for test which performs the best and also to learn more about tree variant data structures , lsm tree is not a tree so keeping that side , we focus on AVL trees , black trees , b trees , b+ trees , b+- trees , treaps , skiplists , will try to impl all of these (hopefully i can keep up) , below is the current status , i do realise that my impl could not be as fast theoritical impls so it might take a good while to make this reach prod grade , but its interesting to learn this way , also found a research paper by the amazing sun yihan which talks about parallel processing of self balancing trees / Augmented trees and also wrote a Lib PAM , my main goal here is use this knowledge to make a simple but different paradigm of a key value store , with in memory db as the application , extend it in the future if needed .
+Hello there! This is my implementation of a data store for another project (a simple web server), mainly for session management and to act as a cache backend with an LSM-tree storage engine. That is the short explanation for why this project is going to take a while to implement. The main reason is that I am writing as many tree implementations as possible to test which one performs the best, while also learning more about different tree-based data structures.
+
+Since an LSM tree is not actually a tree data structure, I will keep that aside for now. Instead, I will focus on AVL Trees, Red-Black Trees, B-Trees, B+ Trees, B* Trees, Treaps, and Skip Lists. I will try to implement all of these (hopefully I can keep up). Below is the current status.
+
+I do realize that my implementations may not be as fast as theoretical or production-grade implementations, so it might take quite some time before this project reaches that level. However, I find it much more interesting to learn by building everything myself.
+
+I also came across a research paper by the amazing Sun Yihan that discusses parallel processing of self-balancing trees and augmented trees, along with the PAM library. My main goal here is to use these ideas to build a simple but different style of key-value store, with an in-memory database as the initial application, and then extend it further in the future if needed.
+
 (DONE CHECKLIST)
-- AVL trees: INS/DEL/JOIN/SPLIT/UNION & RANDOMIZED TESTING 
 
-**NOTE:SO i realised that my AVL sloppy/reckless implmentation is not log N complexity , should be log N to pow 2 , or worse NlogN at places due to excessive recomputation of heights , solution would be to use a vector to store heights properly but i got carried a way and some places i could wrote the code more inconsistently in terms of height updations, i suppose will not make this mistake when implementing the next ones and come back to clean this up later as my main reason is to learn over perfection (wish i was that good) .. **
+* AVL Trees: INS/DEL/JOIN/SPLIT/UNION & RANDOMIZED TESTING
 
-- RB trees : INS/DEL/JOIN/SPLI/UNION & RANDOMIZED TESTING
+**NOTE:** I realized that my AVL implementation is somewhat sloppy and reckless. It is not strictly **O(log N)** as it should be; in several places it is closer to **O(log² N)**, or even **O(N log N)**, because of excessive recomputation of node heights. The proper solution would be to maintain node heights correctly instead of repeatedly recomputing them. I got carried away while writing it, and there are several places where I could have updated heights much more consistently. Hopefully I will not make the same mistake when implementing the remaining data structures, and I will come back later to clean this implementation up. My main reason for this project is to learn rather than chase perfection (I wish I were that good).
 
-**NOTE: This is impl is done properly but could use some formmating and more comments , better use the wiki in case to see the actual structure **
+* RB Trees: INS/DEL/JOIN/SPLIT/UNION & RANDOMIZED TESTING
 
-- B trees and B+ trees : INS/DEL/RANGE SCAN & RANDOMIZED TESTING
+**NOTE:** This implementation is done properly, but it could use better formatting and additional comments. It is probably better to refer to the Wikipedia article if you want to understand the actual structure.
 
-**NOTE: Using order 4 over here , wiki has a good guide over for this as well but better follow a simpler tutorial for deletion cases .. **
+* B-Trees and B+ Trees: INS/DEL/RANGE SCAN & RANDOMIZED TESTING
+
+**NOTE:** I am using an order-4 B-tree here. The Wikipedia article is a good reference, but I found simpler tutorials much easier to follow when implementing the deletion cases.
 
 ## Some notes on analysis
 
-- Coming our analysis both are self balancing trees and you should realise just from the algorithms that both of them are not gonna like to cut your CPU slack while balancing , these solutions are rigid and stricter in making sure the tree is balanced , they want the best possible height which is good but when we think about wanting sub-second performance when working on 10k or more nodes that becomes a pique dream as we need to revalidate and fix them every time we break any rule invariant in them , this idea also stands for weighted trees like treaps , will not be implementing this one as i see their is not benefit except that when do no use height attribute directly in this classification of trees but instead weight which is like number of nodes in a sub tree to help balance the tree . So , you might ask me why use this at all then , mainly one to ass completeness to my learning of why such trees were ever made and how did we transistion to modern solutions , and why simple theoritical ideas can be messed up at implementation , resulting in a soltuion which is not statisfactory . Before i sing prasises of M-ary trees or to be specific B-tree and B+-tree , we can improve the above self balancing trees computation complexity but using join based algorithms here which allow for all bulk operation to be runned in parallel and also we have joining of trees in logarithimic time , we use join , split and union to do thid for us , meaning we have found i a good to accelerate these ideas to compete with newer solutions , as join based algos are simpler to implement and can be run concurrently without any recurrsions or patchs in the code . The join based idea is coming from the Sun Yihan 's CMU thesis paper (wonderful ideas of working tree based parallel algorithms ) , this documents the idea as mentioned before and have constructed a solution using a combination of persistent trees and join based algorithms using path copying called P-tree (refer my blog post for more on this) . Using these ideas we can make construt our data store which is just not a simple key value pair lookup could be just acheived with simple B tree does not need even B+ trees but allows for us to work with range based queries easily and come up with better concurrent soltuons from day one , a important note about B tree is the it needs to belocked when updated as we might have a write amplification and have change from the potin of insertion all the way upto root .
+* Coming to our analysis, both AVL Trees and Red-Black Trees are self-balancing trees, and you can tell just from their algorithms that neither of them is going to give your CPU much of a break while maintaining balance. These solutions are rigid and strict about preserving their balancing invariants. They always aim for the best possible tree height, which is great theoretically, but when we start thinking about sub-second performance on tens of thousands of nodes or more, this becomes difficult because every insertion or deletion may require revalidation and rebalancing whenever an invariant is violated.
 
-- Coming B-tree and B+-tree , both are similar just that we can perform sequential access of nodes easily in B+ tree and also because the way our disk works , due the chaing in the leaf node of B+ trees we can almost pickup reange of values very eaily and this also means the cache friendly as well , B tree 's biggest reason is the we can fit multiple nodes of keys in a single page of our device comapred to normal binary search trees where pointers make up a lot o the original space and allows for a smaller and slight denser tree resulting in aster lookups just by algorithmic logic .nOW , Lets talk about B* variant which is a denser version of B+ trees , is sounds really better as having denser nodes means smaller heights but actually when insertion and deletion operation are done , write amplication will be high every time , in original B+ tree having few internal nodes empty everywhere gave breather for this to occur but now it could go haywore easily , a big reason we do not use it anywhere almost but is a good exercise to see how balanced trees can be pushed to the limits . MassTrees and Bw Trees are another important variants which i will elobarate soon on .... . Coming to skiplists this is a probablistic data structure which provides performance at the rate as B trees but at fraction of computation as its quite smaller and easier to implement as it uses gaussian probablistic idea over some rigid attribute balancing like keight in AVL,RB trees , making is a primary data structure implemntation for mem tables in Key value stores like redis and its variants in drangonflydb .
+  The same idea also applies to weighted trees such as Treaps. I will not be implementing Treaps, as I do not currently see much benefit over the other structures. The main difference is that, instead of explicitly storing and maintaining a height attribute like AVL Trees, they rely on randomly assigned priorities (weights) to maintain balance.
 
-- Some ideas i want to note down first here mainly you will see that in redis we use a ART/Hash as the internal data structure for storing updates and then we flush these down too a AOF file for persistance , the few main bottleneck is (a) IO flush costly , can be mitigated by using deidicated threads , (b) Snapshotting using fork() can lead too huge amount of memory consumption and possibility of OOM (out of bound memory access) errors as well , (c) scaling does not increase by better hardware  (no vertical scaling helps) , we need to horizontal nodes for helping out and mainly here also every new node is not exactly used to maximum potential , when modelled using random variables N (number of nodes) , N X random-variables (mean,sigma) our overall expected mean is N*mean , expected variance is sqrt(N)*variance , now if we replace this with single machine of specs (N*mean,sqrt(N)*variance) we should theoritical have same performance but , now lets has we need provision some more compute everytime lets say n (small amount) , then in case of first case we use n*N*variance and in second case we need n*(sqrt(N))*variance , this difference can be huge , dragonflydb highlights these gaps properly , redis as been optimised for years , so many problems might actually that impactful.Coming to actually what we want to do , we will be making shared-nothing core architecture with each core having its own mem table and we will be using a single LSM tree layer to feed upon the immutable tables generated by each of these cores using sequential IO and compact them accordingly. This is version we will be running for current B+ trees and AVL trees and rb trees , and after that in v2 we will be running a MVCC based method for allowing parallel reading and writing without any issue for compaction , and we can improve paralleisation as well here .
+  So, you might ask why I am implementing these structures at all. The main reason is to complete my understanding of why these trees were developed in the first place, how we transitioned to more modern solutions, and why algorithms that look elegant in theory can become much more complicated when implemented in practice, sometimes resulting in solutions that are far from satisfactory.
 
-## WHAT I WANT AT THE END OF THE DAY !!!
+  Before I start praising M-ary trees—more specifically B-Trees and B+ Trees—it is worth mentioning that we can significantly improve the performance of self-balancing trees by using join-based algorithms. These algorithms allow bulk operations to be executed in parallel while also supporting logarithmic-time joins between trees. Using **join**, **split**, and **union**, we can accelerate many operations and make these data structures much more competitive with newer alternatives.
 
-A simple kv store (all redis features hopefully) which uses my hardware to the limit as i cannot afford to build my own cloud right now (far-fetched dream which i can mostly never do ,,,) .. :> .... Also , extend this as a base version for actual disk based distributed database system like pebble,rocksDB,cassandra,sclladb ... (i can go on for a while) .
+  Another advantage is that join-based algorithms are generally simpler to implement and naturally support concurrent execution without requiring complicated recursive balancing logic or patchwork code.
+
+  The idea of join-based algorithms comes from **Sun Yihan's CMU thesis**, which presents excellent work on parallel tree algorithms. The thesis introduces **P-Trees**, which combine persistent trees with join-based algorithms through path copying. (I have a separate blog post that discusses this in more detail.)
+
+  Using these ideas, we can build a data store that is more than just a simple key-value lookup. While a standard B-Tree is already sufficient for basic key-value storage, B+ Trees make range queries much more efficient and provide a better foundation for concurrent implementations from the beginning.
+
+  One important limitation of traditional B-Trees is that updates may propagate all the way to the root during insertion or deletion. As a result, the affected path generally needs to be locked, increasing write amplification and making concurrency more difficult.
+
+* Coming to B-Trees and B+ Trees, both structures are very similar. The biggest advantage of B+ Trees is that they support efficient sequential traversal through the linked leaf nodes. Since modern storage devices work much better with sequential access patterns, this makes range scans extremely efficient while also improving cache locality.
+
+  The biggest strength of B-Trees is that they can store many keys within a single page. Compared to binary search trees, where pointers consume a significant amount of memory, this results in a much denser tree with a smaller height and consequently fewer page accesses during lookups.
+
+  Now let's talk about the B* Tree, which is essentially a denser version of the B+ Tree. At first glance, it sounds strictly better because denser nodes imply shorter trees. However, the downside is that insertions and deletions become much more expensive due to increased write amplification. Traditional B+ Trees intentionally leave some free space in internal nodes to accommodate future updates, whereas B* Trees maintain much higher occupancy, causing node splits and redistributions to occur more frequently. This is one of the main reasons they are not commonly used in modern database systems, although they are still an excellent exercise for understanding the limits of balanced tree design.
+
+  MassTree and Bw-Tree are two other important variants that I plan to discuss in more detail later.
+
+  Coming to Skip Lists, they are probabilistic data structures that can achieve performance comparable to balanced trees while requiring much simpler algorithms. Instead of maintaining rigid balancing invariants like AVL Trees or Red-Black Trees, Skip Lists rely on randomization to maintain their structure, making them significantly easier to implement. This simplicity is one of the reasons they are commonly used as memtable implementations in key-value stores such as Redis variants and DragonflyDB.
+
+* Some ideas I want to note down here. In Redis, we typically use an ART or a hash table as the primary in-memory data structure, and persistence is achieved by flushing updates to an Append-Only File (AOF).
+
+  The main bottlenecks are:
+
+  (a) I/O flushing can be expensive, although dedicated I/O threads help reduce this overhead.
+
+  (b) Snapshotting through `fork()` can lead to significant memory consumption and, in extreme cases, Out-Of-Memory (OOM) failures because of copy-on-write behavior.
+
+  (c) Scaling does not improve simply by purchasing better hardware. Eventually, we need to scale horizontally, and even then, newly added nodes are often not utilized to their full potential.
+
+  If we model a distributed system using **N** nodes with performance following a random variable of **(mean, variance)**, then the overall expected mean becomes **N × mean**, while the expected variance scales approximately with **√N × variance**. In theory, replacing those nodes with a single machine that provides equivalent aggregate resources should provide similar performance. However, when additional compute is required later, scaling the distributed system requires proportionally more resources than simply upgrading a single machine. DragonflyDB discusses these trade-offs quite well.
+
+  Redis has been optimized for many years, so some of these problems may no longer be as significant in practice.
+
+  Coming back to this project, my goal is to build a shared-nothing architecture where each CPU core owns its own memtable. These independent memtables will eventually feed immutable tables into a single LSM-tree layer through sequential I/O, where compaction will take place.
+
+  This will be the architecture used for the AVL Tree, Red-Black Tree, and B+ Tree implementations in Version 1.
+
+  In Version 2, I plan to move towards an MVCC-based architecture that supports concurrent reads and writes while compaction is taking place. This should also provide a much better foundation for parallel execution.
+
+## WHAT I WANT AT THE END OF THE DAY!!!
+
+A simple key-value store (hopefully with most Redis features) that makes full use of my hardware, since I cannot afford to build my own cloud infrastructure right now (a far-fetched dream that will probably never happen...).
+
+The long-term goal is to use this project as the foundation for a proper disk-based distributed database system, similar in spirit to Pebble, RocksDB, Cassandra, ScyllaDB, and many others.
 
 ## V1 SPECIFICATIONS:
 
- In v1 we will trying to make a multi core shared-nothing memtbales which communicate together with SPSC buffer rings for mutli key lookups/ range scans , this keeps the simple DB architecture like redis and allow us to explore the possiblity of maximum hardware utilisation and also keep our hands away from mutex programming , the reason we adopted a control plane design , is beacuse we could have used a multi core shared architecture which has a global view of the entire db for reading directly , but this would need extensive global locking when each core will try to push its commits (in mem data structure view) to global view , in will slow down everything and we will be doing glorified sequential updates not tru concurrency , meaing this results in no gain from the architecture at all , to properly use this idea here we will need a MVCC , v2 is the new hope fo that . 
+In Version 1, we will be building a multi-core, shared-nothing architecture where each core owns its own memtable. These memtables will communicate with one another through SPSC ring buffers for multi-key lookups and range scans. This keeps the database architecture relatively simple, similar to Redis, while allowing us to explore the possibility of maximizing hardware utilization without relying heavily on mutexes.
 
+The reason for adopting a control-plane design is that the alternative—a shared-memory architecture with a global view of the entire database—would require extensive global locking whenever individual cores attempt to publish their local commits to the shared state. This would significantly reduce concurrency, effectively turning the system into a glorified sequential update engine rather than a truly parallel one.
+
+To make a shared-memory architecture worthwhile, we would need MVCC, which is planned for Version 2.
+
+```text
                  [ Client Session ]
                           |
   ========================v========================  <- Core Thread 0 Boundary
@@ -51,35 +106,55 @@ A simple kv store (all redis features hopefully) which uses my hardware to the l
   | - Local in-mem |  | (Cross-Core|  | - Local in-mem |
   |   List / LSM   |  |  Channel)  |  |   List / LSM   |
   ================    ==============  =================
+```
 
+**Write Path:**
+Write → In-memory data structure (AVL Trees, Red-Black Trees, Skip Lists, or B+ Trees) → WAL → LSM-tree Engine
 
-Write path: Write->In Mem Data structure (AVL Trees , Rb trees , skiplists trees , B+ trees) | -> WAL | ->LSM TREE Engine
-Read path:  | IN Mem Data structure OR -> LSM TREE Engine |
-Replication: We stream WAL updates to REPLICA instances and ensure consistency my sync mechanism
-Recovery: We need one of the replicas to either become our new master .
-Network PROTOCOL : RESP
+**Read Path:**
+In-memory data structure → LSM-tree Engine (if required)
 
+**Replication:**
+WAL updates are streamed to replica instances to maintain consistency through a synchronization mechanism.
+
+**Recovery:**
+In the event of a failure, one of the replicas should be promoted to become the new primary.
+
+**Network Protocol:**
+RESP
 
 ## V2 SPECIFICATIONS:
 
-In this version we will be embracing MVCC and join based tree algorithms , here we will be trying to implement a bot different architecture , we first remove the control plane layer as we can replace its functionality with a Unified data represtation layer which is the combination of all local view of the cores , we will be flushing this to the LSM tree .
+In Version 2, we will embrace MVCC along with join-based tree algorithms. The architecture will also change significantly. The control plane introduced in Version 1 will be removed and replaced with a unified data representation layer that combines the local views of all cores into a consistent global representation before flushing data into the LSM-tree engine.
 
+**Write Path:**
+Write → In-memory data structure → Unified representation → WAL → LSM-tree Engine
 
+**Read Path:**
+In-memory data structure → LSM-tree Engine (if required)
 
-Write path: Write->In Mem Data structure -> Unified represtation | -> WAL | ->LSM TREE Engine
-Read path:  | IN Mem Data structure OR -> LSM TREE Engine |
-Replication: We stream WAL updates to REPLICA instances and ensure consistency my sync mechanism
-Recovery: We need one of the replicas to either become our new master .
-Network PROTOCOL : RESP
+**Replication:**
+WAL updates are streamed to replica instances to maintain consistency through a synchronization mechanism.
+
+**Recovery:**
+One of the replicas should be capable of becoming the new primary after a failure.
+
+**Network Protocol:**
+RESP
 
 ## DESIGN OPTIONS:
-We will be writing into multiple memtables and then compact them before itsflushed to LSM_tree , we will use number cores to dictate number of instances here , we can shard key value space into various partitions , which allows for automatic load balancing as well , coming to our main agenda here , using P Tree we will be making a parallelisable MVCC based solution over the traditional hashtable that redis uses .
-Eviciton policy we will be using 2Q as our policy as its better alternativethen LRU .
-WAL we will be writing allow for peeking and streaming of updates to replicas and also custom on disk storage in case of failure and the need for recovery .
-LSM engine we will be using Tiered compaction algorithm and in the future replace it with a adaptive algorithm which could not prove that useful either , we will be using a simple bloom filter .
+
+We will maintain multiple memtables and compact them before flushing them into the LSM-tree. The number of memtables will generally correspond to the number of CPU cores available. The key-value space can then be partitioned across these memtables, allowing for natural load balancing while preserving the shared-nothing design.
+
+The main long-term goal is to replace the traditional hash table used by Redis with a parallelizable, MVCC-based solution built on P-Trees.
+
+For cache eviction, we will use the **2Q** replacement policy, as it provides a better balance than a traditional LRU policy.
+
+The WAL will support both replication and recovery by allowing updates to be streamed to replicas while also serving as persistent on-disk storage in the event of failures.
+
+The LSM-tree engine will initially use a tiered compaction strategy. In the future, I would like to experiment with adaptive compaction algorithms, although existing research suggests that they may not always provide significant practical improvements. A Bloom filter will also be used to reduce unnecessary disk lookups.
 
 ## Benchmarking:
-Test on JSON based inputs which are converted to RESP , shoudl be a 100 lines of Session data in simple {key:value} format .
 
-
+Testing will be performed on JSON-based inputs that are converted into RESP commands. The initial benchmark dataset will consist of approximately 100 lines of session data stored in a simple `{key: value}` format.
 
