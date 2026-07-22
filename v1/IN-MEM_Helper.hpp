@@ -1,5 +1,6 @@
 #pragma once
 #include "../Data_structures/AVLTree.hpp"
+#include "../Data_structures/Skiplist.cpp"
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -58,36 +59,35 @@ struct Wrap_ZSET {
   // again , so you can do this when optimising performance later on , we will
   // be using skiplist as it does gives us span based attribute help with this .
   std::unordered_map<std::string, int> score_hash;
-  AVLtree<Wrap_ZZSET_internal_DB_key, int, Wrap_ZSET_internal_DB_compactor>
+  SkipList<Wrap_ZZSET_internal_DB_key, int, Wrap_ZSET_internal_DB_compactor>
       score_tree;
+  Wrap_ZSET() = default;
 };
 class Wrap_object {
   Wrap_object_type type;
   Wrap_encoding encoding;
   std::variant<std::string, std::vector<std::string>,
                std::unordered_map<std::string, std::string>,
-               AVLtree<DBKey, std::string, DBKeyComparator>,
-               std::shared_ptr<Wrap_ZSET>>
+               AVLtree<DBKey, std::string, DBKeyComparator> *, Wrap_ZSET *>
       ptr;
   std::vector<std::string> &as_vector() {
     return std::get<std::vector<std::string>>(this->ptr);
   }
   std::string &as_string() { return std::get<std::string>(this->ptr); }
   AVLtree<DBKey, std::string, DBKeyComparator> &as_avl_tree() {
-    return std::get<AVLtree<DBKey, std::string, DBKeyComparator>>(this->ptr);
+    return *std::get<AVLtree<DBKey, std::string, DBKeyComparator> *>(this->ptr);
   }
   std::unordered_map<std::string, std::string> &as_unordered_map() {
     return std::get<std::unordered_map<std::string, std::string>>(this->ptr);
   }
+  Wrap_ZSET &as_ZSET() { return *std::get<Wrap_ZSET *>(this->ptr); }
 
 public:
-  Wrap_object create_string(std::string &val) {
-
+  Wrap_object *create_string(std::string &val) {
     this->type = Wrap_object_type::STRING;
     this->encoding = Wrap_encoding::RAW_STRING;
     this->ptr = val;
-
-    return *this;
+    return this;
   }
   // string ops
   std::string get_string() { return std::get<std::string>(this->ptr); };
@@ -114,11 +114,11 @@ public:
   };
 
   // list ops
-  Wrap_object create_list(std::vector<std::string> &val) {
+  Wrap_object *create_list(std::vector<std::string> &val) {
     this->type = Wrap_object_type::LIST;
     this->encoding = Wrap_encoding::LINKED_LIST;
     this->ptr = val;
-    return *this;
+    return this;
   }
   size_t push_left_list(const std::string &element) {
     auto &v = as_vector();
@@ -200,6 +200,15 @@ public:
     return false;
 
   }; // HSET (returns true if new)
+
+  Wrap_object *create_hashMap() {
+    this->type = Wrap_object_type::HASH;
+    this->encoding = Wrap_encoding::HASHMAP;
+    AVLtree<DBKey, std::string, DBKeyComparator> *avl;
+    this->ptr = avl;
+    return this;
+  }
+
   std::string get_field(const std::string &field) {
     auto &t = as_avl_tree();
     auto s_db_key = new DBKey(field);
@@ -261,8 +270,19 @@ public:
   // ZSet ops
   // Inserts or updates (Score, Member). If score changes, removes old compound
   // key from AVL and re-inserts.
-  bool zset_add(double score, const std::string &member); // ZADD
-  bool remove(const std::string &member);                 // ZREM
+  Wrap_object *create_ZSET() {
+    this->type = Wrap_object_type::HASH;
+    this->encoding = Wrap_encoding::ZSET_TREE;
+    Wrap_ZSET *zset;
+    this->ptr = zset;
+    return this;
+  }
+  bool zset_add(double score, const std::string &member) {
+    auto &t = as_ZSET();
+    t.score_hash[member] = score;
+
+  }; // ZADD
+  bool remove(const std::string &member); // ZREM
 
   // Score & Rank Lookups (Uses Internal Hash Map)
   double get_score(const std::string &member) const; // ZSCORE
