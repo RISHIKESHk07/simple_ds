@@ -23,6 +23,10 @@ struct Wrap_ZZSET_internal_DB_key {
       : score(s), raw_member(std::move(member)) {
     hash = compute_fnv1a(raw_member);
   }
+  static Wrap_ZZSET_internal_DB_key neg_inf() {
+    return {-std::numeric_limits<double>::infinity(), ""};
+  }
+  
 
 private:
   static uint32_t compute_fnv1a(std::string_view str) {
@@ -33,6 +37,14 @@ private:
     }
     return hash;
   }
+
+public:
+  // define this or else printing issues will occur and break the skiplist code/
+  // any tree code
+  friend std::ostream &operator<<(std::ostream &os,
+                                  const Wrap_ZZSET_internal_DB_key &p) {
+    return os << p.score;
+  };
 };
 struct Wrap_ZSET_internal_DB_compactor {
   int operator()(const Wrap_ZZSET_internal_DB_key &a,
@@ -280,6 +292,8 @@ public:
   bool zset_add(double score, const std::string &member) {
     auto &t = as_ZSET();
     t.score_hash[member] = score;
+    auto w = new Wrap_ZZSET_internal_DB_key(score, member);
+    
 
   }; // ZADD
   bool remove(const std::string &member); // ZREM
