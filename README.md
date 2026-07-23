@@ -24,6 +24,10 @@ I also came across a research paper by the amazing Sun Yihan that discusses para
 
 **NOTE:** I am using an order-4 B-tree here. The Wikipedia article is a good reference, but I found simpler tutorials much easier to follow when implementing the deletion cases.
 
+* Skiplist : INS/DEL/RANGE SCAN/INDEX LOOKUP using SPAN & RANDOMIZED TESTING
+
+**NOTE:** This is a simple skiplist implementation which does not use quasi randomization for masking our links , and uses a simple standard probabilistic generator (p=0.5) , so this could be tweaked for better performance but something which more of experimental fine tuning , not something which guartnees better performance. Skiplist is used for ZSET implementation alongside unordered-map.
+
 ## Some notes on analysis
 
 * Coming to our analysis, both AVL Trees and Red-Black Trees are self-balancing trees, and you can tell just from their algorithms that neither of them is going to give your CPU much of a break while maintaining balance. These solutions are rigid and strict about preserving their balancing invariants. They always aim for the best possible tree height, which is great theoretically, but when we start thinking about sub-second performance on tens of thousands of nodes or more, this becomes difficult because every insertion or deletion may require revalidation and rebalancing whenever an invariant is violated.
@@ -50,7 +54,7 @@ I also came across a research paper by the amazing Sun Yihan that discusses para
 
   MassTree and Bw-Tree are two other important variants that I plan to discuss in more detail later.
 
-  Coming to Skip Lists, they are probabilistic data structures that can achieve performance comparable to balanced trees while requiring much simpler algorithms. Instead of maintaining rigid balancing invariants like AVL Trees or Red-Black Trees, Skip Lists rely on randomization to maintain their structure, making them significantly easier to implement. This simplicity is one of the reasons they are commonly used as memtable implementations in key-value stores such as Redis variants and DragonflyDB.
+  Coming to Skip Lists, they are probabilistic data structures that can achieve performance comparable to balanced trees while requiring much simpler algorithms. Instead of maintaining rigid balancing invariants like AVL Trees or Red-Black Trees, Skip Lists rely on randomization to maintain their structure, making them significantly easier to implement. This simplicity is one of the reasons they are commonly used as memtable implementations in key-value stores such as Redis variants and DragonflyDB.Another interesting advantage to skiplists is their concurrency implmentation is also quite easy to work out because , unlike trees the amount of node which we need to lock for consistency is quite less and less contented for , mainly if see the predecessors required in skiplists are spread out , throughout data structure , but incase of trees we will always try to hold locks of parents until the root itself as write amplification can go al the way to root , so when multiple writes occur to the same section (not exactly same point ) their will be alots of contention for locks and retries . These are solved using Masstree implementation for trees which use a optimic locking framework along with tries to make sure concurrency is viable while also maintaing vache coherence of long strings .
 
 * Some ideas I want to note down here. In Redis, we typically use an ART or a hash table as the primary in-memory data structure, and persistence is achieved by flushing updates to an Append-Only File (AOF).
 

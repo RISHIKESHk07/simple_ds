@@ -1,7 +1,7 @@
 #pragma once
 #include "../Data_structures/AVLTree.hpp"
-#include "../Data_structures/Skiplist.cpp"
-#include <algorithm>
+#include "../Data_structures/Skiplist.hpp"
+
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -347,10 +347,49 @@ public:
 
   }; // ZRANGE
 
+  double update_increase_by_delta(double delta, const std::string &member) {
+    auto &z = as_ZSET();
+
+    auto it = z.score_hash.find(member);
+
+    if (it == z.score_hash.end()) {
+      zset_add(delta, member);
+      return delta;
+    }
+
+    double old_score = it->second;
+
+    Wrap_ZZSET_internal_DB_key old_key(old_score, member);
+    z.score_tree.delete_key(old_key);
+
+    double new_score = old_score + delta;
+
+    Wrap_ZZSET_internal_DB_key new_key(new_score, member);
+
+    z.score_tree.insert(new_key, member);
+
+    it->second = new_score;
+
+    return new_score;
+  } // ZCINCRYVY
+
   // Returns elements bounded by numeric score criteria (e.g., scores 100 to
   // 500)
   std::vector<std::pair<std::string, double>>
   get_range_by_score(double min_score, double max_score) {
+
+    auto &z = as_ZSET();
+    Wrap_ZZSET_internal_DB_key left(min_score, "");
+
+    Wrap_ZZSET_internal_DB_key right(max_score, std::string(255, char(255)));
+
+    auto nodes = z.score_tree.range_search(left, right);
+    std::vector<std::pair<std::string, double>> ans;
+
+    for (auto n : nodes) {
+      ans.push_back({n->k.raw_member, n->k.score});
+    }
+    return ans;
 
   }; // ZRANGEBYSCORE
 };
