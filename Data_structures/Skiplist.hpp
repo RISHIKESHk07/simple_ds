@@ -14,6 +14,9 @@ class SkipList {
 
 public:
   struct node {
+    node(KeyType k_, Valuetype v_)
+        : k(k_), v{v_}, right(nullptr), up(nullptr), left(nullptr),
+          down(nullptr) {}
     KeyType k;
     Valuetype v;
     node *right;
@@ -34,14 +37,12 @@ public:
   std::uniform_real_distribution<double> dist{0.0, 1.0};
 
   SkipList() : gen(rd()) {
-    sl = new node();
+    sl = new node(KeyType::neg_inf(), "HEAD");
     sl->down = nullptr;
     sl->up = nullptr;
     sl->left = nullptr;
     sl->right = nullptr;
     sl->is_head = 1;
-    sl->k = KeyType::neg_inf();
-    sl->v = "HEAD";
     sl->is_head_start = 1;
   }
   // probability generator
@@ -148,27 +149,23 @@ public:
   void insert(KeyType k_ins, Valuetype v_ins) {
     // case when we have empty skiplist becuase we deleted everything in it ...
     if (sl == nullptr) {
-      sl = new node();
+      sl = new node(KeyType::neg_inf(), "HEAD");
       sl->down = nullptr;
       sl->up = nullptr;
       sl->left = nullptr;
       sl->right = nullptr;
       sl->is_head = 1;
-      sl->k = KeyType::neg_inf();
-      sl->v = "HEAD";
       sl->is_head_start = 1;
     }
     // new node addition initial condiiton ,
     if (sl->right == nullptr) {
-      auto n = new node();
+      auto n = new node(k_ins, v_ins);
       n->left = sl;
       n->up = nullptr;
       n->down = nullptr;
       n->right = nullptr;
       sl->right_skip_gap = 1;
       n->right_skip_gap = 0;
-      n->k = k_ins;
-      n->v = v_ins;
       length_skiplist = 1;
       height_skiplist = 1;
 
@@ -187,11 +184,9 @@ public:
     // element in preds if youre trying to keep track
     auto pred_addition_node = s.first;
     node *succ_addition_node = nullptr;
-    auto new_n = new node();
+    auto new_n = new node(k_ins, v_ins);
     new_n->left = pred_addition_node;
     new_n->right = pred_addition_node->right;
-    new_n->k = k_ins;
-    new_n->v = v_ins;
     new_n->down = nullptr;
     new_n->up = nullptr;
 
@@ -220,24 +215,20 @@ public:
     if (new_node_height > height_skiplist) {
       int diff = new_node_height - height_skiplist;
       // new highhest level
-      auto n_h = new node();
+      auto n_h = new node(KeyType::neg_inf(), "HEAD");
       n_h->left = nullptr;
       n_h->up = nullptr;
-      n_h->k = KeyType::neg_inf();
-      n_h->v = "HEAD";
       // updated down in while loop below
       n_h->is_head_start = 1;
       n_h->is_head = 1;
       n_h->right_skip_gap = bp_index + 1;
 
-      auto n = new node();
+      auto n = new node(k_ins, v_ins);
       n->left = n_h;
       n->up = nullptr;
       n->down = nullptr;
       n->right = nullptr;
       n->right_skip_gap = length_skiplist - bp_index - 1;
-      n->k = k_ins;
-      n->v = v_ins;
 
       n_h->right = n;
       sl = n_h;
@@ -246,22 +237,18 @@ public:
       // remaing additional levels requied
       node *prev_h = n_h;
       while (diff > 1) {
-        auto n_h = new node();
+        auto n_h = new node(KeyType::neg_inf(), "HEAD");
         n_h->left = nullptr;
         n_h->up = prev_h;
         n_h->is_head = 1;
         n_h->right_skip_gap = bp_index + 1;
-        n_h->k = KeyType::neg_inf();
-        n_h->v = "HEAD";
 
-        auto n = new node();
+        auto n = new node(k_ins, v_ins);
         n->left = n_h;
         n->down = nullptr;
         n->up = prev_bottom;
         n->right = nullptr;
         n->right_skip_gap = (length_skiplist - bp_index - 1);
-        n->k = k_ins;
-        n->v = v_ins;
 
         prev_bottom->down = n;
         n_h->right = n;
@@ -294,11 +281,9 @@ public:
     for (int i = r; i <= static_cast<int>(preds.size()) - 1; i++) {
       auto pred_addition_node2 = preds[i];
       node *succ_addition_node2 = nullptr;
-      auto new_n2 = new node();
+      auto new_n2 = new node(k_ins, v_ins);
       new_n2->left = pred_addition_node2.first;
       new_n2->right = pred_addition_node2.first->right;
-      new_n2->k = k_ins;
-      new_n2->v = v_ins;
       new_n2->up = prev_bottom;
       int new_pred_gap = (bp_index + 1) - pred_addition_node2.second;
       int new_n2_gap =

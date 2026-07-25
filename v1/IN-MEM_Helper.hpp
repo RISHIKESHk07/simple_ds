@@ -1,12 +1,16 @@
 #pragma once
 #include "../Data_structures/AVLTree.hpp"
 #include "../Data_structures/Skiplist.hpp"
-
+#include "./IN-MEM_DB_key_spec.hpp"
 #include <cstdint>
+#include <iostream>
+#include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
 #include <vector>
+
 // Internal wrapper objects
 enum class Wrap_object_type { LIST, SORTED_SET, HASH, STRING };
 enum class Wrap_encoding {
@@ -47,6 +51,7 @@ public:
     return os << p.score;
   };
 };
+
 struct Wrap_ZSET_internal_DB_compactor {
   int operator()(const Wrap_ZZSET_internal_DB_key &a,
                  const Wrap_ZZSET_internal_DB_key &b) {
@@ -66,30 +71,30 @@ struct Wrap_ZSET_internal_DB_compactor {
 };
 
 struct Wrap_ZSET {
-  // internal hashmap using unordered
-  // tree based search (or) skiplist , we need a order static tree for impl here
-  // the current avl tree is quite messy already would not want to change stuff
-  // again , so you can do this when optimising performance later on , we will
-  // be using skiplist as it does gives us span based attribute help with this .
-  std::unordered_map<std::string, int> score_hash;
+  std::unordered_map<std::string, double>
+      score_hash; // Fixed score type to double
   SkipList<Wrap_ZZSET_internal_DB_key, std::string,
            Wrap_ZSET_internal_DB_compactor>
       score_tree;
   Wrap_ZSET() = default;
 };
+
 class Wrap_object {
   Wrap_object_type type;
   Wrap_encoding encoding;
   std::variant<std::string, std::vector<std::string>,
                std::unordered_map<std::string, std::string>,
-               AVLtree<DBKey, std::string, DBKeyComparator> *, Wrap_ZSET *>
+               AVLtree<std::string, std::string, StringComparator> *,
+               Wrap_ZSET *>
       ptr;
+
   std::vector<std::string> &as_vector() {
     return std::get<std::vector<std::string>>(this->ptr);
   }
   std::string &as_string() { return std::get<std::string>(this->ptr); }
-  AVLtree<DBKey, std::string, DBKeyComparator> &as_avl_tree() {
-    return *std::get<AVLtree<DBKey, std::string, DBKeyComparator> *>(this->ptr);
+  AVLtree<std::string, std::string, StringComparator> &as_avl_tree() {
+    return *std::get<AVLtree<std::string, std::string, StringComparator> *>(
+        this->ptr);
   }
   std::unordered_map<std::string, std::string> &as_unordered_map() {
     return std::get<std::unordered_map<std::string, std::string>>(this->ptr);
@@ -103,6 +108,7 @@ public:
     this->ptr = val;
     return this;
   }
+
   // string ops
   std::string get_string() { return std::get<std::string>(this->ptr); };
   int64_t incr_by(int64_t increment) {
@@ -164,7 +170,8 @@ public:
     auto &v = as_vector();
     int64_t resolved_index =
         (index < 0) ? (static_cast<int64_t>(v.size()) + index) : index;
-    if (resolved_index < 0 || resolved_index > static_cast<int64_t>(v.size())) {
+    if (resolved_index < 0 ||
+        resolved_index >= static_cast<int64_t>(v.size())) {
       return "out of bounds";
     }
     return v[resolved_index];
@@ -173,7 +180,8 @@ public:
     auto &v = as_vector();
     int64_t resolved_index =
         (index < 0) ? (static_cast<int64_t>(v.size()) + index) : index;
-    if (resolved_index < 0 || resolved_index > static_cast<int64_t>(v.size())) {
+    if (resolved_index < 0 ||
+        resolved_index >= static_cast<int64_t>(v.size())) {
       return;
     }
     v[resolved_index] = value;
@@ -182,51 +190,50 @@ public:
     auto &v = as_vector();
     return v.size();
   }; // LLEN
-  std::vector<std::string> get_range_list(int64_t start, int64_t end) {
+  std::optional<std::vector<std::string>> get_range_list(int64_t start,
+                                                         int64_t end) {
     auto &v = as_vector();
     int64_t start_resolved_index =
         (start < 0) ? (static_cast<int64_t>(v.size()) + start) : start;
     int64_t end_resolved_index =
         (end < 0) ? (static_cast<int64_t>(v.size()) + end) : end;
-    std::vector<std::string> temp;
-    if (start < 0 || start > v.size()) {
-      return temp;
-    } else if (end < 0 || end > v.size()) {
-      return temp;
-    } else if (start > end) {
-      return temp;
-    } else {
-
-      return std::vector<std::string>(v.begin() + start, v.begin() + end);
+    if (start_resolved_index < 0 ||
+        start_resolved_index >= static_cast<int64_t>(v.size()) ||
+        end_resolved_index < 0 ||
+        end_resolved_index >= static_cast<int64_t>(v.size()) ||
+        start_resolved_index > end_resolved_index) {
+      return std::nullopt;
     }
+    return std::vector<std::string>(v.begin() + start_resolved_index,
+                                    v.begin() + end_resolved_index + 1);
   };
 
   // hash ops
   bool set_field(const std::string &field, const std::string &value) {
     auto &t = as_avl_tree();
-    auto s_db_key = new DBKey(field);
-    auto s = t.search_internal(*s_db_key, t.tree);
+    auto s = t.search(field, t.tree);
     if (s.first == nullptr) {
-      t.insertion(*s_db_key, value);
+      t.insertion(field, value);
+      t.printTree();
+      auto h = t.search(field, t.tree);
+      std::cout << h.first->key << std::endl;
       return true;
     }
     s.first->val = value;
     return false;
-
   }; // HSET (returns true if new)
 
   Wrap_object *create_hashMap() {
     this->type = Wrap_object_type::HASH;
     this->encoding = Wrap_encoding::HASHMAP;
-    AVLtree<DBKey, std::string, DBKeyComparator> *avl;
-    this->ptr = avl;
+    this->ptr = new AVLtree<std::string, std::string, StringComparator>();
     return this;
   }
 
   std::string get_field(const std::string &field) {
     auto &t = as_avl_tree();
-    auto s_db_key = new DBKey(field);
-    auto s = t.search_internal(*s_db_key, t.tree);
+
+    auto s = t.search(field, t.tree);
     if (s.first == nullptr) {
       return "not fund ..";
     }
@@ -234,25 +241,20 @@ public:
   }; // HGET
   bool delete_field(const std::string &field) {
     auto &t = as_avl_tree();
-    auto s_db_key = new DBKey(field);
-    auto s = t.search_internal(*s_db_key, t.tree);
+
+    auto s = t.search(field, t.tree);
     if (s.first == nullptr) {
       return false;
     }
-    t.deletion(*s_db_key);
+    t.deletion(field);
     return true;
-
   }; // HDEL
 
   // Multi-Field Variants
   void set_multiple(
       const std::vector<std::pair<std::string, std::string>> &field_values) {
     for (auto i : field_values) {
-      if (set_field(i.first, i.second)) {
-        std::cout << "set completed" << std::endl;
-      } else {
-        std::cout << "set not completed" << std::endl;
-      }
+      set_field(i.first, i.second);
     }
   }; // HMSET
   std::vector<std::string>
@@ -269,12 +271,8 @@ public:
   }; // HLEN
   bool exists_hash(const std::string &field) {
     auto &t = as_avl_tree();
-    auto s_db_key = new DBKey(field);
-    auto s = t.search_internal(*s_db_key, t.tree);
-    if (s.first == nullptr) {
-      return false;
-    }
-    return true;
+    auto s = t.search(field, t.tree);
+    return s.first != nullptr;
   }; // HEXISTS
   std::vector<std::pair<std::string, std::string>> get_all_hash() {
     auto &t = as_avl_tree();
@@ -282,53 +280,49 @@ public:
   };
 
   // ZSet ops
-  // Inserts or updates (Score, Member). If score changes, removes old compound
-  // key from AVL and re-inserts.
   Wrap_object *create_ZSET() {
-    this->type = Wrap_object_type::HASH;
+    this->type = Wrap_object_type::SORTED_SET;
     this->encoding = Wrap_encoding::ZSET_TREE;
-    Wrap_ZSET *zset;
-    this->ptr = zset;
+    this->ptr = new Wrap_ZSET();
     return this;
   }
   bool zset_add(double score, const std::string &member) {
     auto &t = as_ZSET();
     t.score_hash[member] = score;
-    auto w = new Wrap_ZZSET_internal_DB_key(score, member);
-    auto [s, index_l, preds] = t.score_tree.search(*w);
-    t.score_tree.insert(*w, (*w).raw_member);
-    return 1;
-
+    Wrap_ZZSET_internal_DB_key w(score, member);
+    t.score_tree.insert(w, w.raw_member);
+    return true;
   }; // ZADD
   bool remove(const std::string &member) {
     auto &t = as_ZSET();
-    auto w = new Wrap_ZZSET_internal_DB_key(t.score_hash[member], member);
-    t.score_hash.erase(member);
-    t.score_tree.delete_key(*w);
-    return 1;
-
+    auto it = t.score_hash.find(member);
+    if (it == t.score_hash.end())
+      return false;
+    Wrap_ZZSET_internal_DB_key w(it->second, member);
+    t.score_hash.erase(it);
+    t.score_tree.delete_key(w);
+    return true;
   }; // ZREM
 
-  // Score & Rank Lookups (Uses Internal Hash Map)
   double get_score(const std::string &member) {
     auto &t = as_ZSET();
-
     return t.score_hash[member];
   }; // ZSCORE
   int64_t get_rank(const std::string &member) {
     auto &t = as_ZSET();
-    auto w = new Wrap_ZZSET_internal_DB_key(t.score_hash[member], member);
-    auto [s, index_lenght, preds] = t.score_tree.search(*w);
+    auto it = t.score_hash.find(member);
+    if (it == t.score_hash.end())
+      return -1;
+    auto [s, index_lenght, preds] =
+        t.score_tree.search(Wrap_ZZSET_internal_DB_key(it->second, member));
     return index_lenght;
-  }; // ZRANK (1-indexed position in sorted order)
+  }; // ZRANK
 
-  // Sorted Range Scans (Traverses Internal Compound Skiplist )
   size_t size() {
     auto &t = as_ZSET();
     return t.score_tree.length_skiplist;
   }; // ZCARD
 
-  // Returns elements ordered by index rank (e.g., top 10 players)
   std::vector<std::pair<std::string, double>> get_range_by_rank(int64_t start,
                                                                 int64_t end) {
     auto &t = as_ZSET();
@@ -344,12 +338,10 @@ public:
       }
       return res;
     }
-
   }; // ZRANGE
 
   double update_increase_by_delta(double delta, const std::string &member) {
     auto &z = as_ZSET();
-
     auto it = z.score_hash.find(member);
 
     if (it == z.score_hash.end()) {
@@ -358,29 +350,22 @@ public:
     }
 
     double old_score = it->second;
-
     Wrap_ZZSET_internal_DB_key old_key(old_score, member);
     z.score_tree.delete_key(old_key);
 
     double new_score = old_score + delta;
-
     Wrap_ZZSET_internal_DB_key new_key(new_score, member);
 
     z.score_tree.insert(new_key, member);
-
     it->second = new_score;
 
     return new_score;
-  } // ZCINCRYVY
+  } // ZINCRBY
 
-  // Returns elements bounded by numeric score criteria (e.g., scores 100 to
-  // 500)
   std::vector<std::pair<std::string, double>>
   get_range_by_score(double min_score, double max_score) {
-
     auto &z = as_ZSET();
     Wrap_ZZSET_internal_DB_key left(min_score, "");
-
     Wrap_ZZSET_internal_DB_key right(max_score, std::string(255, char(255)));
 
     auto nodes = z.score_tree.range_search(left, right);
@@ -390,6 +375,57 @@ public:
       ans.push_back({n->k.raw_member, n->k.score});
     }
     return ans;
-
   }; // ZRANGEBYSCORE
+
+  void pretty_print(std::ostream &os = std::cout) const {
+    os << "----------------------------------------\n";
+    switch (type) {
+    case Wrap_object_type::STRING: {
+      os << "Type    : STRING\n";
+      os << "Value   : \"" << std::get<std::string>(this->ptr) << "\"\n";
+      break;
+    }
+    case Wrap_object_type::LIST: {
+      const auto &v = std::get<std::vector<std::string>>(this->ptr);
+      os << "Type    : LIST (Size: " << v.size() << ")\n";
+      for (size_t i = 0; i < v.size(); ++i) {
+        os << "  [" << i << "] -> \"" << v[i] << "\"\n";
+      }
+      break;
+    }
+    case Wrap_object_type::HASH: {
+      os << "Type    : HASH (AVL Tree)\n";
+      auto *tree_ptr =
+          std::get<AVLtree<std::string, std::string, StringComparator> *>(
+              this->ptr);
+      if (tree_ptr) {
+        auto all_pairs = tree_ptr->inorder_full_traversal();
+        tree_ptr->printTree();
+        os << "Size    : " << all_pairs.size() << "\n";
+        for (const auto &[field, value] : all_pairs) {
+          os << "  " << field << " => \"" << value << "\"\n";
+        }
+      } else {
+        os << "  (Empty / Uninitialized)\n";
+      }
+      break;
+    }
+    case Wrap_object_type::SORTED_SET: {
+      os << "Type    : SORTED_SET (ZSET - Skiplist + Hash)\n";
+      auto *zset_ptr = std::get<Wrap_ZSET *>(this->ptr);
+      if (zset_ptr) {
+        os << "Size    : " << zset_ptr->score_hash.size() << "\n";
+        os << "Members :\n";
+        for (const auto &[member, score] : zset_ptr->score_hash) {
+          os << "  - " << member << " (Score: " << score << ")\n";
+        }
+        zset_ptr->score_tree.prettyPrint();
+      } else {
+        os << "  (Empty / Uninitialized)\n";
+      }
+      break;
+    }
+    }
+    os << "----------------------------------------\n";
+  }
 };

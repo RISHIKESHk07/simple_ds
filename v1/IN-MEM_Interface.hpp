@@ -37,7 +37,7 @@ public:
     return true;
   }
 
-  std::optional<V> look_up(const K &key) override {
+  std::optional<std::pair<K, V>> find(const K &key) override {
     auto result = tree.search(key, tree.tree);
 
     if (result.first == nullptr)
@@ -73,13 +73,13 @@ public:
     return true;
   }
 
-  std::optional<V> look_up(const K &key) override {
+  std::optional<std::pair<K, V>> find(const K &key) override {
     auto result = tree.search(key, tree.tree);
 
     if (result.first == nullptr)
       return std::nullopt;
 
-    return result.first->val;
+    return std::pair<K, V>{result.first->key, result.first->val};
   }
 
   std::vector<std::pair<K, V>> range_scan(const K &begin,
@@ -118,7 +118,7 @@ public:
 
   bool erase(const K &key) { return index->delete_node(key); }
 
-  std::pair<K, V> find(const K &key) { return index->look_up(key); }
+  std::optional<std::pair<K, V>> find(const K &key) { return index->find(key); }
 
   std::vector<std::pair<K, V>> scan(const K &start, const K &end) {
     return index->range_scan(start, end);

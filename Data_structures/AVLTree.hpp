@@ -212,7 +212,6 @@ public:
   };
 };
 
-#include "../v1/IN-MEM_DB_key_spec.hpp"
 #include <algorithm>
 #include <cassert>
 #include <climits>
@@ -268,7 +267,7 @@ public:
     if (cmp(tree->key, k) == 0)
       return {current_ptr, parent_ptr};
 
-    else if (cmp(tree->key, k) == -1)
+    else if (cmp(tree->key, k) == 1)
       return search_internal(k, tree->left, tree->left, tree);
 
     else
@@ -547,12 +546,15 @@ public:
   // returns:
   // first  -> rebalance start node
   // second -> subtree that became shorter
+
   std::pair<node *, node *> bst_delete(KeyType k) {
-
+    // 1. Locate the exact target node and its structural parent
     auto u_pos = search(k, tree);
+    node *target = u_pos.first;
+    node *parent = u_pos.second;
 
-    if (u_pos.first == nullptr)
-      return {nullptr, nullptr};
+    if (target == nullptr)
+      return {nullptr, nullptr}; // Key not found, change nothing
 
     node *rebalance_start = nullptr;
     node *shrunk_subtree = nullptr;
@@ -560,80 +562,60 @@ public:
     // --------------------------------------------------------
     // CASE 1 : NO LEFT CHILD
     // --------------------------------------------------------
+    if (target->left == nullptr) {
+      rebalance_start = parent;
+      shrunk_subtree = target->right;
 
-    if (u_pos.first->left == nullptr) {
-
-      rebalance_start = u_pos.second;
-
-      shrunk_subtree = (u_pos.second && u_pos.second->left == u_pos.first)
-                           ? u_pos.second->left
-                       : u_pos.second ? u_pos.second->right
-                                      : nullptr;
-
-      shift_nodes(u_pos.first, u_pos.first->right);
-
+      shift_nodes(target, target->right);
+      heightb.erase(target); // Wipe balance factor tracking data
+      delete target;
       return {rebalance_start, shrunk_subtree};
     }
 
     // --------------------------------------------------------
     // CASE 2 : NO RIGHT CHILD
     // --------------------------------------------------------
+    else if (target->right == nullptr) {
+      rebalance_start = parent;
+      shrunk_subtree = target->left;
 
-    else if (u_pos.first->right == nullptr) {
-
-      rebalance_start = u_pos.second;
-
-      shrunk_subtree = (u_pos.second && u_pos.second->left == u_pos.first)
-                           ? u_pos.second->left
-                       : u_pos.second ? u_pos.second->right
-                                      : nullptr;
-
-      shift_nodes(u_pos.first, u_pos.first->left);
-
+      shift_nodes(target, target->left);
+      heightb.erase(target); // Wipe balance factor tracking data
+      delete target;
       return {rebalance_start, shrunk_subtree};
     }
 
     // --------------------------------------------------------
-    // CASE 3 : TWO CHILDREN
+    // CASE 3 : TWO CHILDREN (FIXED POINTER TRACKING)
     // --------------------------------------------------------
-
     else {
-
-      auto y = bst_succesor(u_pos.first);
-
-      auto y_pos = search(y->key, tree);
-
-      // ----------------------------------------------------
-      // successor not direct child
-      // ----------------------------------------------------
-
-      if (y_pos.second != u_pos.first) {
-
-        // THIS is where subtree height first changes
-        rebalance_start = y_pos.second;
-
-        // successor removed from LEFT side of parent
-        shrunk_subtree = y_pos.second->left;
-
-        shift_nodes(y_pos.first, y_pos.first->right);
-
-        y->right = u_pos.first->right;
+      // Find successor directly via pointers (Never use key-search here!)
+      node *y = target->right;
+      node *y_parent = target;
+      while (y->left != nullptr) {
+        y_parent = y;
+        y = y->left;
       }
 
-      // ----------------------------------------------------
-      // successor direct child
-      // ----------------------------------------------------
+      // Track rebalance configurations relative to y's removal position
+      if (y_parent != target) {
+        rebalance_start = y_parent;
+        shrunk_subtree = y->right;
 
-      else {
-
+        // Disconnect y from its parent channel safely
+        y_parent->left = y->right;
+        y->right = target->right;
+      } else {
         rebalance_start = y;
-
         shrunk_subtree = y->right;
       }
 
-      shift_nodes(u_pos.first, y);
+      // Replace target node positions with y structural attributes
+      shift_nodes(target, y);
+      y->left = target->left;
 
-      y->left = u_pos.first->left;
+      heightb.erase(target); // Safe cleanup
+      delete target;
 
       return {rebalance_start, shrunk_subtree};
     }
@@ -960,45 +942,49 @@ public:
                      UnionTrees(temp.second, t1->right), t1->key, t1->val);
     }
   }
-  std::vector<node *> flatten_tree(node *tree, std::vector<node *> res) {
+  void flatten_tree(node *tree, std::vector<node *> &res = {}) {
     if (tree == nullptr) {
       return;
-    } else {
-      flatten_tree(tree->left);
-      res.push_back(tree);
-      flatten_tree(tree->right);
     }
+    flatten_tree(tree->left, res);
+    res.push_back(tree);
+    flatten_tree(tree->right, res);
   }
 
-  std::vector<std::pair<std::string, std::string>> inorder_full_traversal() {
+  std::vector<std::pair<KeyType, ValueType>> inorder_full_traversal() {
     std::vector<node *> vec;
-    std::vector<std::pair<std::string, std::string>> res;
-    auto v = flatten_tree(tree, vec);
-    for (auto i : v) {
-      res.push_back({i.key, i.val});
+    std::vector<std::pair<KeyType, ValueType>> res;
+    flatten_tree(tree, vec);
+    for (auto i : vec) {
+      res.push_back({i->key, i->val});
     }
     return res;
   }
 
-  std::vector<std::pair<std::string, std::string>>
+  std::vector<std::pair<KeyType, ValueType>>
   inorder_range_traversal(KeyType k1, KeyType k2) {
     auto n1 = search(k1, tree);
     auto n2 = search(k2, tree);
+    std::vector<std::pair<KeyType, ValueType>> res;
+
     if (n1.first == nullptr || n2.first == nullptr) {
-    }
-    std::vector<std::pair<std::string, std::string>> res;
-
-    while (n1 != n2) {
-      res.push_back({n1.first.key, n1.first.val});
-      n1 = bst_succesor(n1);
+      return res;
     }
 
-    res.push_back({n2.first.key, n2.first.val});
+    auto t1 = n1.first;
+    auto t2 = n2.first;
+    while (t1 != t2) {
+      res.push_back({t1->key, t1->val});
+      auto temp = bst_succesor(t1);
+      t1 = temp;
+    }
+
+    res.push_back({n2.first->key, n2.first->val});
 
     return res;
   }
 
-  int size_of_tree() {
+  size_t size_of_tree() {
     std::vector<node *> in_order;
     flatten_tree(tree, in_order);
     if (in_order.size() == 0)

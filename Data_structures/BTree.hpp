@@ -1038,32 +1038,32 @@ struct IntComparator {
   }
 };
 
-int main() {
-  test_basic_insertions<int, int, IntComparator>();
-
-  test_ascending_insertions<int, int, IntComparator>();
-
-  test_descending_insertions<int, int, IntComparator>();
-
-  test_random_insertions<int, int, IntComparator>();
-
-  test_basic_deletions<int, int, IntComparator>();
-
-  test_ascending_deletions<int, int, IntComparator>();
-
-  test_descending_deletions<int, int, IntComparator>();
-
-  test_internal_deletions<int, int, IntComparator>();
-
-  test_random_deletions<int, int, IntComparator>();
-
-  test_duplicate_delete_calls<int, int, IntComparator>();
-
-  test_mixed_random_operations<int, int, IntComparator>();
-
-  std::cout << "\n=====================================\n";
-  std::cout << "All tests completed successfully.\n";
-  std::cout << "=====================================\n";
-
-  return 0;
-}
+// int main() {
+//   test_basic_insertions<int, int, IntComparator>();
+//
+//   test_ascending_insertions<int, int, IntComparator>();
+//
+//   test_descending_insertions<int, int, IntComparator>();
+//
+//   test_random_insertions<int, int, IntComparator>();
+//
+//   test_basic_deletions<int, int, IntComparator>();
+//
+//   test_ascending_deletions<int, int, IntComparator>();
+//
+//   test_descending_deletions<int, int, IntComparator>();
+//
+//   test_internal_deletions<int, int, IntComparator>();
+//
+//   test_random_deletions<int, int, IntComparator>();
+//
+//   test_duplicate_delete_calls<int, int, IntComparator>();
+//
+//   test_mixed_random_operations<int, int, IntComparator>();
+//
+//   std::cout << "\n=====================================\n";
+//   std::cout << "All tests completed successfully.\n";
+//   std::cout << "=====================================\n";
+//
+//   return 0;
+// }
