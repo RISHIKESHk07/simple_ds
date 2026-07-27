@@ -19,6 +19,7 @@ public:
   virtual std::vector<std::pair<K, V>> range_scan(const K &low,
                                                   const K &high) = 0;
   virtual size_t size() = 0;
+  virtual void print() = 0;
 };
 
 template <typename K, typename V, typename Comparator>
@@ -38,12 +39,13 @@ public:
   }
 
   std::optional<std::pair<K, V>> find(const K &key) override {
-    auto result = tree.search(key, tree.tree);
+    auto result = tree.search(tree.tree, key);
 
-    if (result.first == nullptr)
+    if (result.second == -1)
       return std::nullopt;
 
-    return result.first->val;
+    return std::pair<K, V>{result.first->keys[result.second],
+                           result.first->values[result.second]};
   }
 
   std::vector<std::pair<K, V>> range_scan(const K &begin,
@@ -53,7 +55,7 @@ public:
 
   size_t size() override { return tree.size_of_tree(); }
 
-  void print() { tree.printTree(); }
+  void print() override { tree.printTree(); }
 };
 
 template <typename K, typename V, typename Comparator>
@@ -89,7 +91,7 @@ public:
 
   size_t size() override { return tree.size_of_tree(); }
 
-  void print() { tree.printTree(); }
+  void print() override { tree.printTree(); }
 };
 template <Memtable_tree_interfaces T, typename K, typename V, typename C>
 class MemtableFactory {
@@ -98,6 +100,8 @@ public:
   static std::unique_ptr<Base_adapter<K, V>> create_memtable() {
     if constexpr (T == Memtable_tree_interfaces::AVL) {
       return std::make_unique<AVL_interface<K, V, C>>();
+    } else if constexpr (T == Memtable_tree_interfaces::B) {
+      return std::make_unique<B_interface<K, V, C>>();
     }
   }
 };
@@ -125,4 +129,6 @@ public:
   }
 
   size_t size() { return index->size(); }
+
+  void print_memtable() { index->print(); }
 };

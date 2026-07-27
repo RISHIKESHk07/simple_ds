@@ -10,6 +10,9 @@ struct DBKey {
   DBKey(std::string key) : raw_key(std::move(key)) {
     hash = compute_fnv1a(raw_key);
   }
+  friend std::ostream &operator<<(std::ostream &os, const DBKey &p) {
+    return os << p.raw_key;
+  }
 
 private:
   static uint32_t compute_fnv1a(std::string_view str) {
