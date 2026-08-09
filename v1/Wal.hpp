@@ -57,6 +57,13 @@ public:
     ROW = 0x05
   };
 
+  struct checkpoint_payload {
+    char Identity[64];
+    uint64_t segment_id;
+    uint64_t timestamp;
+    uint64_t checkpoint_lsn;
+  };
+
   struct segment_header_payload {
     char Identity[64];
     uint64_t segment_id;
@@ -97,7 +104,6 @@ public:
   struct CheckpointInfo {
     uint64_t checkpoint_lsn;
     uint64_t timestamp;
-    uint64_t active_tx_count;
     uint64_t segment_id;
   };
 
@@ -127,8 +133,10 @@ private:
     for (int i = 0; i < 256; i++) {
       uint32_t crc = static_cast<uint32_t>(i);
       for (int j = 0; j < 8; j++) {
-        if (crc & 1) crc = (crc >> 1) ^ 0x82F63B78;
-        else crc >>= 1;
+        if (crc & 1)
+          crc = (crc >> 1) ^ 0x82F63B78;
+        else
+          crc >>= 1;
       }
       lookup_table[i] = crc;
     }
@@ -171,27 +179,27 @@ private:
   }
 
   bool flush_sync_controller(int fd, const std::vector<unsigned char> &v) {
-    if (fd < 0) return false;
+    if (fd < 0)
+      return false;
     size_t total_written = 0;
     while (total_written < v.size()) {
-      ssize_t bytes = write(fd, v.data() + total_written, v.size() - total_written);
+      ssize_t bytes =
+          write(fd, v.data() + total_written, v.size() - total_written);
       if (bytes < 0) {
-        if (errno == EINTR) continue;
+        if (errno == EINTR)
+          continue;
         return false;
       }
       total_written += bytes;
     }
 
-    if (config.ss == sync_strategy::ALWAYS) {
-      if (fsync(fd) < 0) return false;
-      durable_lsn = next_lsn;
-    }
     return true;
   }
 
   bool truncate_file(const std::string &path, off_t valid_length) {
     int fd = open(path.c_str(), O_RDWR);
-    if (fd < 0) return false;
+    if (fd < 0)
+      return false;
     if (ftruncate(fd, valid_length) != 0) {
       close(fd);
       return false;
@@ -214,7 +222,8 @@ public:
   ~WAL() {
     prune_var.store(true);
     prune_cv.notify_all();
-    if (pruning_thread.joinable()) pruning_thread.join();
+    if (pruning_thread.joinable())
+      pruning_thread.join();
     if (active_fd >= 0) {
       fsync(active_fd);
       close(active_fd);
@@ -223,8 +232,10 @@ public:
 
   bool sync() {
     std::lock_guard<std::mutex> lock(wal_mutex);
-    if (active_fd < 0) return false;
-    if (fsync(active_fd) < 0) return false;
+    if (active_fd < 0)
+      return false;
+    if (fsync(active_fd) < 0)
+      return false;
 
     durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
     return true;
@@ -232,27 +243,70 @@ public:
 
   bool sync_through() {
     return sync();
-  }
+  } // this going to be used when we have multiple writers , not going to be a
+    // thing now
 
+  bool checkpoint() {
+    std::string seg_path = config.base_dir + "/seg_" +
+                           std::to_string(segment_id) + "_lsn" +
+                           std::to_string(current_base_lsn) + ".wal";
+    int active_fid = -1;
+    active_fid = open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (active_fid < 0)
+      return false;
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto mili = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
+    checkpoint_payload chp{};
+    std::strncpy(chp.Identity, config.Identity.c_str(),
+                 sizeof(config.Identity) - 1);
+    chp.segment_id = segment_id;
+    chp.checkpoint_lsn = next_lsn - 1;
+    chp.timestamp = mili.count();
+
+    frame_record ch_fr;
+    ch_fr.header.header_length = config.RECORD_HEADER_SIZE;
+    ch_fr.header.LSN = next_lsn;
+    ch_fr.header.payload_length = sizeof(chp);
+    ch_fr.header.record_type = Record_type::CHECKPOINT;
+    auto *byte_ptr = reinterpret_cast<unsigned char *>(&chp);
+    ch_fr.payload.assign(byte_ptr, byte_ptr + sizeof(chp));
+
+    auto v = compute_byte_frame(ch_fr);
+    ch_fr.checksum = compute_checksum_crc32c(v);
+    append_bytes(v, ch_fr.checksum);
+
+    CheckpointInfo cpi;
+    cpi.timestamp = chp.timestamp;
+    cpi.checkpoint_lsn = chp.checkpoint_lsn;
+    cpi.segment_id = chp.segment_id;
+
+    checkpoint_list.push_back(cpi);
+
+    return true;
+  }
 
   bool recover_and_rebuild() {
     std::lock_guard<std::mutex> lock(wal_mutex);
     segment_list.clear();
 
     std::vector<std::filesystem::path> wal_files;
-    for (const auto &entry : std::filesystem::directory_iterator(config.base_dir)) {
+    for (const auto &entry :
+         std::filesystem::directory_iterator(config.base_dir)) {
       if (entry.is_regular_file() && entry.path().extension() == ".wal") {
         wal_files.push_back(entry.path());
       }
     }
 
-    if (wal_files.empty()) return true;
+    if (wal_files.empty())
+      return true;
 
     std::sort(wal_files.begin(), wal_files.end());
 
     for (const auto &filePath : wal_files) {
       int fd = open(filePath.c_str(), O_RDONLY);
-      if (fd < 0) continue;
+      if (fd < 0)
+        continue;
 
       SegmentInfo sgi;
       sgi.base_file_path = filePath.string();
@@ -268,12 +322,14 @@ public:
       while (true) {
         current_offset = lseek(fd, 0, SEEK_CUR);
         if (!decode_frame_from_fd(fd, fr)) {
-          // If decoding failed before reaching end-of-file, we hit corrupt/partial bytes at the tail
+          // If decoding failed before reaching end-of-file, we hit
+          // corrupt/partial bytes at the tail
           off_t file_size = lseek(fd, 0, SEEK_END);
           if (valid_offset < file_size) {
-            std::cerr << "[WAL RECOVERY] Found corrupt or torn tail frame at offset " 
-                      << valid_offset << " in " << filePath.string() 
-                      << ". Truncating damaged bytes..." << std::endl;
+            std::cerr
+                << "[WAL RECOVERY] Found corrupt or torn tail frame at offset "
+                << valid_offset << " in " << filePath.string()
+                << ". Truncating damaged bytes..." << std::endl;
 
             close(fd);
             truncate_file(filePath.string(), valid_offset);
@@ -284,7 +340,8 @@ public:
 
         if (fr.header.record_type == Record_type::SEGMENT_HEADER) {
           if (fr.payload.size() >= sizeof(segment_header_payload)) {
-            auto *shp = reinterpret_cast<const segment_header_payload *>(fr.payload.data());
+            auto *shp = reinterpret_cast<const segment_header_payload *>(
+                fr.payload.data());
             sgi.segment_id = shp->segment_id;
             sgi.base_lsn = shp->base_lsn;
             has_header = true;
@@ -311,7 +368,8 @@ public:
 
         if (!is_sealed) {
           // Re-open repaired active segment for appending
-          active_fd = open(sgi.base_file_path.c_str(), O_WRONLY | O_APPEND, 0644);
+          active_fd =
+              open(sgi.base_file_path.c_str(), O_WRONLY | O_APPEND, 0644);
           active_segment_space = sgi.number_of_records;
           current_base_lsn = sgi.base_lsn;
         }
@@ -324,7 +382,7 @@ public:
     }
 
     durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
-    std::cout << "[WAL RECOVERY] Clean rebuild complete. next_lsn=" << next_lsn 
+    std::cout << "[WAL RECOVERY] Clean rebuild complete. next_lsn=" << next_lsn
               << ", active_segment_id=" << segment_id << std::endl;
     return true;
   }
@@ -355,23 +413,27 @@ public:
   bool decode_frame_from_fd(int fd, frame_record &final_fr) {
     uint8_t hdr_buf[28];
     ssize_t r = read(fd, hdr_buf, 28);
-    if (r < 28) return false;
+    if (r < 28)
+      return false;
 
     std::vector<unsigned char> hdr_vec(hdr_buf, hdr_buf + 28);
     size_t off = 0;
     final_fr.header.LSN = read_bytes<uint64_t>(hdr_vec, off);
     final_fr.header.version_number = read_bytes<uint16_t>(hdr_vec, off);
-    final_fr.header.record_type = static_cast<Record_type>(read_bytes<uint16_t>(hdr_vec, off));
+    final_fr.header.record_type =
+        static_cast<Record_type>(read_bytes<uint16_t>(hdr_vec, off));
     final_fr.header.header_length = read_bytes<uint64_t>(hdr_vec, off);
     final_fr.header.payload_length = read_bytes<uint64_t>(hdr_vec, off);
 
     final_fr.payload.resize(final_fr.header.payload_length);
     r = read(fd, final_fr.payload.data(), final_fr.header.payload_length);
-    if (r < static_cast<ssize_t>(final_fr.header.payload_length)) return false;
+    if (r < static_cast<ssize_t>(final_fr.header.payload_length))
+      return false;
 
     uint8_t crc_buf[4];
     r = read(fd, crc_buf, 4);
-    if (r < 4) return false;
+    if (r < 4)
+      return false;
 
     std::vector<unsigned char> crc_vec(crc_buf, crc_buf + 4);
     off = 0;
@@ -379,7 +441,8 @@ public:
 
     auto byte_frame = compute_byte_frame(final_fr);
     if (compute_checksum_crc32c(byte_frame) != final_fr.checksum) {
-      std::cerr << "[WAL CORRUPTION] CRC mismatch on LSN " << final_fr.header.LSN << std::endl;
+      std::cerr << "[WAL CORRUPTION] CRC mismatch on LSN "
+                << final_fr.header.LSN << std::endl;
       return false;
     }
     return true;
@@ -395,10 +458,12 @@ public:
         break;
       }
     }
-    if (target_path.empty()) return std::nullopt;
+    if (target_path.empty())
+      return std::nullopt;
 
     int fd = open(target_path.c_str(), O_RDONLY);
-    if (fd < 0) return std::nullopt;
+    if (fd < 0)
+      return std::nullopt;
 
     frame_record fr;
     while (decode_frame_from_fd(fd, fr)) {
@@ -416,13 +481,16 @@ public:
     std::vector<unsigned char> py(str_.begin(), str_.end());
 
     if (active_fd == -1) {
-      std::string seg_path = config.base_dir + "/seg_" + std::to_string(segment_id) +
-                             "_lsn" + std::to_string(current_base_lsn) + ".wal";
+      std::string seg_path = config.base_dir + "/seg_" +
+                             std::to_string(segment_id) + "_lsn" +
+                             std::to_string(current_base_lsn) + ".wal";
       active_fd = open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
-      if (active_fd < 0) return false;
+      if (active_fd < 0)
+        return false;
 
       segment_header_payload sh_pay{};
-      std::strncpy(sh_pay.Identity, config.Identity.c_str(), sizeof(sh_pay.Identity) - 1);
+      std::strncpy(sh_pay.Identity, config.Identity.c_str(),
+                   sizeof(sh_pay.Identity) - 1);
       sh_pay.segment_id = segment_id;
       sh_pay.base_lsn = current_base_lsn;
 
@@ -488,7 +556,12 @@ public:
       append_bytes(ss_v, ss_fr.checksum);
 
       flush_sync_controller(active_fd, ss_v);
-      fsync(active_fd);
+
+      if (config.ss == sync_strategy::ALWAYS) {
+        if (fsync(active_fd) < 0)
+          return false;
+        durable_lsn = next_lsn;
+      }
       close(active_fd);
 
       current_base_lsn = next_lsn + 1;
@@ -507,11 +580,11 @@ public:
     return next_lsn;
   }
 
-  void wait_for_new_data(uint64_t current_lsn, std::chrono::milliseconds timeout) {
+  void wait_for_new_data(uint64_t current_lsn,
+                         std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(wal_mutex);
-    tail_cv.wait_for(lock, timeout, [this, current_lsn] {
-      return next_lsn > current_lsn;
-    });
+    tail_cv.wait_for(lock, timeout,
+                     [this, current_lsn] { return next_lsn > current_lsn; });
   }
 
 private:
@@ -519,9 +592,11 @@ private:
     while (!prune_var.load()) {
       {
         std::unique_lock<std::mutex> lock(prune_mutex);
-        prune_cv.wait_for(lock, std::chrono::seconds(10), [this] { return prune_var.load(); });
+        prune_cv.wait_for(lock, std::chrono::seconds(10),
+                          [this] { return prune_var.load(); });
       }
-      if (prune_var.load()) break;
+      if (prune_var.load())
+        break;
       execute_prune_process();
     }
   }
@@ -535,7 +610,8 @@ private:
       if (it->last_lsn < min_pin && segment_list.size() > 1) {
         std::error_code ec;
         if (std::filesystem::remove(it->base_file_path, ec)) {
-          std::cout << "[PRUNER] Deleted retention-safe segment: " << it->base_file_path << "\n";
+          std::cout << "[PRUNER] Deleted retention-safe segment: "
+                    << it->base_file_path << "\n";
           it = segment_list.erase(it);
           continue;
         }
@@ -565,7 +641,8 @@ public:
     }
   }
 
-  std::optional<WAL::frame_record> next(bool follow_tail = true, uint32_t timeout_ms = 1000) {
+  std::optional<WAL::frame_record> next(bool follow_tail = true,
+                                        uint32_t timeout_ms = 1000) {
     while (true) {
       auto record = wal_ref->read_record_at_lsn(current_lsn);
       if (record.has_value()) {
@@ -574,9 +651,11 @@ public:
         return record;
       }
 
-      if (!follow_tail) return std::nullopt;
+      if (!follow_tail)
+        return std::nullopt;
 
-      wal_ref->wait_for_new_data(current_lsn, std::chrono::milliseconds(timeout_ms));
+      wal_ref->wait_for_new_data(current_lsn,
+                                 std::chrono::milliseconds(timeout_ms));
 
       if (wal_ref->get_next_lsn() <= current_lsn) {
         return std::nullopt;

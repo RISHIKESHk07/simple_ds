@@ -24,9 +24,7 @@ struct RespCommand {
   std::vector<std::string> args; // e.g., ["myzset", "100", "Alice"]
 };
 
-// ==========================================
-// RESPONSE OBJECT & STATE DEFINITION
-// ==========================================
+
 enum class ResponseStatus {
   SUCCESS,
   NOT_FOUND,
@@ -54,7 +52,6 @@ struct CmdResponse {
   double double_val{0.0};
   std::vector<std::string> array_val;
 
-  // --- Constructors ---
   CmdResponse() = default;
 
   static CmdResponse Ok() {
