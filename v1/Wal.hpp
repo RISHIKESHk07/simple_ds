@@ -1,13 +1,17 @@
 #pragma once
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -17,7 +21,15 @@
 #include <unordered_map>
 #include <vector>
 
-enum class error_codes { NONE, RUNTIME, SYNC_POLICY_ERROR };
+// --- ERROR HANDLING & LOGGING INFRASTRUCTURE ---
+
+enum class error_codes {
+  NONE,
+  RUNTIME_ERROR,
+  CORRUPTION_DETECTED,
+  SYNC_FAILED,
+  SHUTDOWN_ERROR
+};
 
 class error_object {
   error_codes ec = error_codes::NONE;
@@ -26,9 +38,40 @@ class error_object {
 public:
   void set_message(const std::string &mes) { message = mes; }
   void set_code(error_codes c) { ec = c; }
+  error_codes get_code() const { return ec; }
+  std::optional<std::string> get_message() const { return message; }
+  bool failed() const { return ec != error_codes::NONE; }
   void reset() {
     message = std::nullopt;
     ec = error_codes::NONE;
+  }
+};
+
+class ILogger {
+public:
+  virtual ~ILogger() = default;
+  virtual void log(const std::string &level, const std::string &message) = 0;
+};
+
+class FileSink : public ILogger {
+  std::ofstream log_file;
+  std::mutex sink_mutex;
+
+public:
+  explicit FileSink(const std::string &filename) {
+    log_file.open(filename, std::ios::app);
+  }
+
+  void log(const std::string &level, const std::string &message) override {
+    std::lock_guard<std::mutex> lock(sink_mutex);
+    if (log_file.is_open()) {
+      auto now = std::chrono::system_clock::to_time_t(
+          std::chrono::system_clock::now());
+      char buf[32];
+      std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S",
+                    std::localtime(&now));
+      log_file << "[" << buf << "] [" << level << "] " << message << std::endl;
+    }
   }
 };
 
@@ -44,6 +87,7 @@ struct WAL_config {
   uint32_t RECORD_HEADER_SIZE = 28;
   uint32_t GROUP_COMMIT_R = 30;
   uint32_t GROUP_COMMIT_T = 60; // ms
+  std::shared_ptr<ILogger> logger = nullptr;
 };
 
 class WAL {
@@ -76,6 +120,12 @@ public:
     uint64_t segment_id;
     uint64_t final_lsn;
     uint64_t total_records;
+  };
+
+  struct shutdown_payload {
+    char Identity[64];
+    uint64_t timestamp;
+    uint64_t final_lsn;
   };
 
   struct frame_record_header {
@@ -116,6 +166,7 @@ private:
   uint64_t current_base_lsn = 0;
   uint64_t segment_id = 0;
   uint32_t lookup_table[256];
+  std::atomic<bool> is_shutdown{false};
 
   std::vector<SegmentInfo> segment_list;
   std::vector<CheckpointInfo> checkpoint_list;
@@ -128,6 +179,12 @@ private:
   std::atomic<bool> prune_var{false};
   std::mutex prune_mutex;
   std::condition_variable prune_cv;
+
+  void log_internal(const std::string &lvl, const std::string &msg) {
+    if (config.logger) {
+      config.logger->log(lvl, msg);
+    }
+  }
 
   void table_preprocess() {
     for (int i = 0; i < 256; i++) {
@@ -192,7 +249,6 @@ private:
       }
       total_written += bytes;
     }
-
     return true;
   }
 
@@ -210,181 +266,276 @@ private:
   }
 
 public:
-  explicit WAL(WAL_config &conf) : config(conf) {
-    table_preprocess();
-    std::filesystem::create_directories(config.base_dir);
+  explicit WAL(WAL_config &conf, error_object &err) : config(conf) {
+    err.reset();
+    try {
+      table_preprocess();
+      std::filesystem::create_directories(config.base_dir);
 
-    recover_and_rebuild();
+      recover_and_rebuild(err);
+      if (err.failed())
+        return;
 
-    pruning_thread = std::thread([this]() { start_prune_process(); });
+      pruning_thread = std::thread([this]() { start_prune_process(); });
+      log_internal("INFO", "WAL engine initialized successfully.");
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(std::string("Constructor Exception: ") + e.what());
+      log_internal("ERROR", err.get_message().value());
+    } catch (...) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message("Unknown exception during WAL initialization.");
+      log_internal("ERROR", err.get_message().value());
+    }
   }
 
   ~WAL() {
-    prune_var.store(true);
-    prune_cv.notify_all();
-    if (pruning_thread.joinable())
-      pruning_thread.join();
-    if (active_fd >= 0) {
-      fsync(active_fd);
-      close(active_fd);
-    }
+    error_object err;
+    shutdown(err);
   }
 
-  bool sync() {
-    std::lock_guard<std::mutex> lock(wal_mutex);
-    if (active_fd < 0)
-      return false;
-    if (fsync(active_fd) < 0)
-      return false;
+  // --- SHUTDOWN & SEAL FUNCTION ---
 
-    durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
-    return true;
-  }
-
-  bool sync_through() {
-    return sync();
-  } // this going to be used when we have multiple writers , not going to be a
-    // thing now
-
-  bool checkpoint() {
-    std::string seg_path = config.base_dir + "/seg_" +
-                           std::to_string(segment_id) + "_lsn" +
-                           std::to_string(current_base_lsn) + ".wal";
-    int active_fid = -1;
-    active_fid = open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
-    if (active_fid < 0)
-      return false;
-    auto now = std::chrono::system_clock::now();
-    auto duration = now.time_since_epoch();
-    auto mili = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
-    checkpoint_payload chp{};
-    std::strncpy(chp.Identity, config.Identity.c_str(),
-                 sizeof(config.Identity) - 1);
-    chp.segment_id = segment_id;
-    chp.checkpoint_lsn = next_lsn - 1;
-    chp.timestamp = mili.count();
-
-    frame_record ch_fr;
-    ch_fr.header.header_length = config.RECORD_HEADER_SIZE;
-    ch_fr.header.LSN = next_lsn;
-    ch_fr.header.payload_length = sizeof(chp);
-    ch_fr.header.record_type = Record_type::CHECKPOINT;
-    auto *byte_ptr = reinterpret_cast<unsigned char *>(&chp);
-    ch_fr.payload.assign(byte_ptr, byte_ptr + sizeof(chp));
-
-    auto v = compute_byte_frame(ch_fr);
-    ch_fr.checksum = compute_checksum_crc32c(v);
-    append_bytes(v, ch_fr.checksum);
-
-    CheckpointInfo cpi;
-    cpi.timestamp = chp.timestamp;
-    cpi.checkpoint_lsn = chp.checkpoint_lsn;
-    cpi.segment_id = chp.segment_id;
-
-    checkpoint_list.push_back(cpi);
-
-    return true;
-  }
-
-  bool recover_and_rebuild() {
-    std::lock_guard<std::mutex> lock(wal_mutex);
-    segment_list.clear();
-
-    std::vector<std::filesystem::path> wal_files;
-    for (const auto &entry :
-         std::filesystem::directory_iterator(config.base_dir)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".wal") {
-        wal_files.push_back(entry.path());
-      }
-    }
-
-    if (wal_files.empty())
+  bool shutdown(error_object &err) {
+    err.reset();
+    if (is_shutdown.exchange(true))
       return true;
 
-    std::sort(wal_files.begin(), wal_files.end());
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
 
-    for (const auto &filePath : wal_files) {
-      int fd = open(filePath.c_str(), O_RDONLY);
-      if (fd < 0)
-        continue;
+      prune_var.store(true);
+      prune_cv.notify_all();
+      if (pruning_thread.joinable())
+        pruning_thread.join();
 
-      SegmentInfo sgi;
-      sgi.base_file_path = filePath.string();
-      sgi.number_of_records = 0;
+      if (active_fd >= 0) {
+        // Emit Shutdown Seal Payload
+        shutdown_payload sp{};
+        std::strncpy(sp.Identity, config.Identity.c_str(),
+                     sizeof(sp.Identity) - 1);
+        auto now = std::chrono::system_clock::now().time_since_epoch();
+        sp.timestamp =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+        sp.final_lsn = next_lsn;
 
-      frame_record fr;
-      bool has_header = false;
-      bool is_sealed = false;
+        frame_record sd_fr;
+        sd_fr.header.header_length = config.RECORD_HEADER_SIZE;
+        sd_fr.header.LSN = next_lsn;
+        sd_fr.header.payload_length = sizeof(sp);
+        sd_fr.header.record_type = Record_type::SHUTDOWN;
 
-      off_t valid_offset = 0;
-      off_t current_offset = 0;
+        auto *byte_ptr = reinterpret_cast<unsigned char *>(&sp);
+        sd_fr.payload.assign(byte_ptr, byte_ptr + sizeof(sp));
 
-      while (true) {
-        current_offset = lseek(fd, 0, SEEK_CUR);
-        if (!decode_frame_from_fd(fd, fr)) {
-          // If decoding failed before reaching end-of-file, we hit
-          // corrupt/partial bytes at the tail
-          off_t file_size = lseek(fd, 0, SEEK_END);
-          if (valid_offset < file_size) {
-            std::cerr
-                << "[WAL RECOVERY] Found corrupt or torn tail frame at offset "
-                << valid_offset << " in " << filePath.string()
-                << ". Truncating damaged bytes..." << std::endl;
+        auto v = compute_byte_frame(sd_fr);
+        sd_fr.checksum = compute_checksum_crc32c(v);
+        append_bytes(v, sd_fr.checksum);
 
-            close(fd);
-            truncate_file(filePath.string(), valid_offset);
-            fd = -1; // Flag file as truncated and handled
-          }
-          break;
-        }
+        flush_sync_controller(active_fd, v);
+        fsync(active_fd);
+        close(active_fd);
+        active_fd = -1;
 
-        if (fr.header.record_type == Record_type::SEGMENT_HEADER) {
-          if (fr.payload.size() >= sizeof(segment_header_payload)) {
-            auto *shp = reinterpret_cast<const segment_header_payload *>(
-                fr.payload.data());
-            sgi.segment_id = shp->segment_id;
-            sgi.base_lsn = shp->base_lsn;
-            has_header = true;
-          }
-        } else if (fr.header.record_type == Record_type::SEGMENT_SEAL) {
-          is_sealed = true;
-        }
-
-        sgi.last_lsn = fr.header.LSN;
-        sgi.number_of_records++;
-        next_lsn = std::max(next_lsn, fr.header.LSN + 1);
-
-        // Update valid boundary after successful CRC verification
-        valid_offset = lseek(fd, 0, SEEK_CUR);
+        log_internal(
+            "INFO",
+            "Shutdown seal successfully written to active WAL segment.");
       }
-
-      if (fd >= 0) {
-        close(fd);
-      }
-
-      if (has_header) {
-        segment_list.push_back(sgi);
-        segment_id = std::max(segment_id, sgi.segment_id);
-
-        if (!is_sealed) {
-          // Re-open repaired active segment for appending
-          active_fd =
-              open(sgi.base_file_path.c_str(), O_WRONLY | O_APPEND, 0644);
-          active_segment_space = sgi.number_of_records;
-          current_base_lsn = sgi.base_lsn;
-        }
-      }
+      return true;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::SHUTDOWN_ERROR);
+      err.set_message(std::string("Shutdown Exception: ") + e.what());
+      log_internal("ERROR", err.get_message().value());
+      return false;
+    } catch (...) {
+      err.set_code(error_codes::SHUTDOWN_ERROR);
+      err.set_message("Unknown error occurred during WAL shutdown.");
+      log_internal("ERROR", err.get_message().value());
+      return false;
     }
+  }
 
-    if (active_fd < 0 && !segment_list.empty()) {
-      segment_id++;
-      current_base_lsn = next_lsn;
+  bool sync(error_object &err) {
+    err.reset();
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
+      if (active_fd < 0)
+        return true;
+      if (fsync(active_fd) < 0) {
+        err.set_code(error_codes::SYNC_FAILED);
+        err.set_message("fsync system call failed on active FD.");
+        log_internal("ERROR", err.get_message().value());
+        return false;
+      }
+      durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
+      return true;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(e.what());
+      log_internal("ERROR", err.get_message().value());
+      return false;
     }
+  }
 
-    durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
-    std::cout << "[WAL RECOVERY] Clean rebuild complete. next_lsn=" << next_lsn
-              << ", active_segment_id=" << segment_id << std::endl;
-    return true;
+  bool sync_through(error_object &err) { return sync(err); }
+
+  bool checkpoint(error_object &err) {
+    err.reset();
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
+      std::string seg_path = config.base_dir + "/seg_" +
+                             std::to_string(segment_id) + "_lsn" +
+                             std::to_string(current_base_lsn) + ".wal";
+      int active_fid =
+          open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
+      if (active_fid < 0) {
+        err.set_code(error_codes::RUNTIME_ERROR);
+        err.set_message("Failed to open file for checkpoint writing.");
+        log_internal("ERROR", err.get_message().value());
+        return false;
+      }
+
+      auto now = std::chrono::system_clock::now().time_since_epoch();
+      auto mili = std::chrono::duration_cast<std::chrono::milliseconds>(now);
+
+      checkpoint_payload chp{};
+      std::strncpy(chp.Identity, config.Identity.c_str(),
+                   sizeof(chp.Identity) - 1);
+      chp.segment_id = segment_id;
+      chp.checkpoint_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
+      chp.timestamp = mili.count();
+
+      frame_record ch_fr;
+      ch_fr.header.header_length = config.RECORD_HEADER_SIZE;
+      ch_fr.header.LSN = next_lsn;
+      ch_fr.header.payload_length = sizeof(chp);
+      ch_fr.header.record_type = Record_type::CHECKPOINT;
+
+      auto *byte_ptr = reinterpret_cast<unsigned char *>(&chp);
+      ch_fr.payload.assign(byte_ptr, byte_ptr + sizeof(chp));
+
+      auto v = compute_byte_frame(ch_fr);
+      ch_fr.checksum = compute_checksum_crc32c(v);
+      append_bytes(v, ch_fr.checksum);
+
+      flush_sync_controller(active_fid, v);
+      close(active_fid);
+
+      checkpoint_list.push_back(
+          {chp.checkpoint_lsn, chp.timestamp, chp.segment_id});
+      log_internal("INFO", "Checkpoint record created at LSN " +
+                               std::to_string(chp.checkpoint_lsn));
+      return true;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(e.what());
+      log_internal("ERROR", err.get_message().value());
+      return false;
+    }
+  }
+
+  bool recover_and_rebuild(error_object &err) {
+    err.reset();
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
+      segment_list.clear();
+
+      std::vector<std::filesystem::path> wal_files;
+      for (const auto &entry :
+           std::filesystem::directory_iterator(config.base_dir)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".wal") {
+          wal_files.push_back(entry.path());
+        }
+      }
+
+      if (wal_files.empty())
+        return true;
+
+      std::sort(wal_files.begin(), wal_files.end());
+
+      for (const auto &filePath : wal_files) {
+        int fd = open(filePath.c_str(), O_RDONLY);
+        if (fd < 0)
+          continue;
+
+        SegmentInfo sgi;
+        sgi.base_file_path = filePath.string();
+        sgi.number_of_records = 0;
+
+        frame_record fr;
+        bool has_header = false;
+        bool is_sealed = false;
+
+        off_t valid_offset = 0;
+
+        while (true) {
+          if (!decode_frame_from_fd(fd, fr)) {
+            off_t file_size = lseek(fd, 0, SEEK_END);
+            if (valid_offset < file_size) {
+              std::string msg =
+                  "[WAL RECOVERY] Corrupt tail frame detected at offset " +
+                  std::to_string(valid_offset) + " in " + filePath.string() +
+                  ". Truncating damaged bytes.";
+              log_internal("WARN", msg);
+
+              close(fd);
+              truncate_file(filePath.string(), valid_offset);
+              fd = -1;
+            }
+            break;
+          }
+
+          if (fr.header.record_type == Record_type::SEGMENT_HEADER) {
+            if (fr.payload.size() >= sizeof(segment_header_payload)) {
+              auto *shp = reinterpret_cast<const segment_header_payload *>(
+                  fr.payload.data());
+              sgi.segment_id = shp->segment_id;
+              sgi.base_lsn = shp->base_lsn;
+              has_header = true;
+            }
+          } else if (fr.header.record_type == Record_type::SEGMENT_SEAL ||
+                     fr.header.record_type == Record_type::SHUTDOWN) {
+            is_sealed = true;
+          }
+
+          sgi.last_lsn = fr.header.LSN;
+          sgi.number_of_records++;
+          next_lsn = std::max(next_lsn, fr.header.LSN + 1);
+
+          valid_offset = lseek(fd, 0, SEEK_CUR);
+        }
+
+        if (fd >= 0)
+          close(fd);
+
+        if (has_header) {
+          segment_list.push_back(sgi);
+          segment_id = std::max(segment_id, sgi.segment_id);
+
+          if (!is_sealed) {
+            active_fd =
+                open(sgi.base_file_path.c_str(), O_WRONLY | O_APPEND, 0644);
+            active_segment_space = sgi.number_of_records;
+            current_base_lsn = sgi.base_lsn;
+          }
+        }
+      }
+
+      if (active_fd < 0 && !segment_list.empty()) {
+        segment_id++;
+        current_base_lsn = next_lsn;
+      }
+
+      durable_lsn = (next_lsn > 0) ? next_lsn - 1 : 0;
+      log_internal("INFO", "Recovery rebuild completed. next_lsn=" +
+                               std::to_string(next_lsn));
+      return true;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(std::string("Recovery Failure: ") + e.what());
+      log_internal("ERROR", err.get_message().value());
+      return false;
+    }
   }
 
   void register_reader(int id, uint64_t start_lsn) {
@@ -441,138 +592,174 @@ public:
 
     auto byte_frame = compute_byte_frame(final_fr);
     if (compute_checksum_crc32c(byte_frame) != final_fr.checksum) {
-      std::cerr << "[WAL CORRUPTION] CRC mismatch on LSN "
-                << final_fr.header.LSN << std::endl;
+      log_internal("ERROR", "CRC checksum mismatch detected on frame LSN " +
+                                std::to_string(final_fr.header.LSN));
       return false;
     }
     return true;
   }
 
-  std::optional<frame_record> read_record_at_lsn(uint64_t target_lsn) {
-    std::lock_guard<std::mutex> lock(wal_mutex);
-    std::string target_path;
+  std::optional<frame_record> read_record_at_lsn(uint64_t target_lsn,
+                                                 error_object &err) {
+    err.reset();
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
+      std::string target_path;
 
-    for (const auto &seg : segment_list) {
-      if (seg.base_lsn <= target_lsn && seg.last_lsn >= target_lsn) {
-        target_path = seg.base_file_path;
-        break;
+      for (const auto &seg : segment_list) {
+        if (seg.base_lsn <= target_lsn && seg.last_lsn >= target_lsn) {
+          target_path = seg.base_file_path;
+          break;
+        }
       }
-    }
-    if (target_path.empty())
-      return std::nullopt;
+      if (target_path.empty())
+        return std::nullopt;
 
-    int fd = open(target_path.c_str(), O_RDONLY);
-    if (fd < 0)
-      return std::nullopt;
+      int fd = open(target_path.c_str(), O_RDONLY);
+      if (fd < 0)
+        return std::nullopt;
 
-    frame_record fr;
-    while (decode_frame_from_fd(fd, fr)) {
-      if (fr.header.LSN == target_lsn) {
-        close(fd);
-        return fr;
+      frame_record fr;
+      while (decode_frame_from_fd(fd, fr)) {
+        if (fr.header.LSN == target_lsn) {
+          close(fd);
+          return fr;
+        }
       }
+      close(fd);
+      return std::nullopt;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(e.what());
+      log_internal("ERROR", err.get_message().value());
+      return std::nullopt;
     }
-    close(fd);
-    return std::nullopt;
   }
 
-  bool append(const std::string &str_) {
-    std::lock_guard<std::mutex> lock(wal_mutex);
-    std::vector<unsigned char> py(str_.begin(), str_.end());
-
-    if (active_fd == -1) {
-      std::string seg_path = config.base_dir + "/seg_" +
-                             std::to_string(segment_id) + "_lsn" +
-                             std::to_string(current_base_lsn) + ".wal";
-      active_fd = open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
-      if (active_fd < 0)
+  bool append(const std::string &str_, error_object &err) {
+    err.reset();
+    try {
+      std::lock_guard<std::mutex> lock(wal_mutex);
+      if (is_shutdown.load()) {
+        err.set_code(error_codes::SHUTDOWN_ERROR);
+        err.set_message("Cannot append record: WAL is already shut down.");
         return false;
+      }
 
-      segment_header_payload sh_pay{};
-      std::strncpy(sh_pay.Identity, config.Identity.c_str(),
-                   sizeof(sh_pay.Identity) - 1);
-      sh_pay.segment_id = segment_id;
-      sh_pay.base_lsn = current_base_lsn;
+      std::vector<unsigned char> py(str_.begin(), str_.end());
 
-      frame_record sh_fr;
-      sh_fr.header.header_length = config.RECORD_HEADER_SIZE;
-      sh_fr.header.LSN = next_lsn;
-      sh_fr.header.payload_length = sizeof(sh_pay);
-      sh_fr.header.record_type = Record_type::SEGMENT_HEADER;
+      if (active_fd == -1) {
+        std::string seg_path = config.base_dir + "/seg_" +
+                               std::to_string(segment_id) + "_lsn" +
+                               std::to_string(current_base_lsn) + ".wal";
+        active_fd = open(seg_path.c_str(), O_CREAT | O_WRONLY | O_APPEND, 0644);
+        if (active_fd < 0) {
+          err.set_code(error_codes::RUNTIME_ERROR);
+          err.set_message("Failed to open segment file for append.");
+          log_internal("ERROR", err.get_message().value());
+          return false;
+        }
 
-      auto *byte_ptr = reinterpret_cast<unsigned char *>(&sh_pay);
-      sh_fr.payload.assign(byte_ptr, byte_ptr + sizeof(sh_pay));
+        segment_header_payload sh_pay{};
+        std::strncpy(sh_pay.Identity, config.Identity.c_str(),
+                     sizeof(sh_pay.Identity) - 1);
+        sh_pay.segment_id = segment_id;
+        sh_pay.base_lsn = current_base_lsn;
 
-      auto sv = compute_byte_frame(sh_fr);
-      sh_fr.checksum = compute_checksum_crc32c(sv);
-      append_bytes(sv, sh_fr.checksum);
+        frame_record sh_fr;
+        sh_fr.header.header_length = config.RECORD_HEADER_SIZE;
+        sh_fr.header.LSN = next_lsn;
+        sh_fr.header.payload_length = sizeof(sh_pay);
+        sh_fr.header.record_type = Record_type::SEGMENT_HEADER;
 
-      flush_sync_controller(active_fd, sv);
+        auto *byte_ptr = reinterpret_cast<unsigned char *>(&sh_pay);
+        sh_fr.payload.assign(byte_ptr, byte_ptr + sizeof(sh_pay));
 
-      SegmentInfo sgi;
-      sgi.base_lsn = next_lsn;
-      sgi.segment_id = segment_id;
-      sgi.base_file_path = seg_path;
-      sgi.last_lsn = next_lsn;
-      sgi.number_of_records = 1;
-      segment_list.push_back(sgi);
+        auto sv = compute_byte_frame(sh_fr);
+        sh_fr.checksum = compute_checksum_crc32c(sv);
+        append_bytes(sv, sh_fr.checksum);
+
+        flush_sync_controller(active_fd, sv);
+
+        SegmentInfo sgi;
+        sgi.base_lsn = next_lsn;
+        sgi.segment_id = segment_id;
+        sgi.base_file_path = seg_path;
+        sgi.last_lsn = next_lsn;
+        sgi.number_of_records = 1;
+        segment_list.push_back(sgi);
+
+        next_lsn++;
+        active_segment_space++;
+      }
+
+      frame_record fr;
+      fr.header.header_length = config.RECORD_HEADER_SIZE;
+      fr.header.LSN = next_lsn;
+      fr.header.payload_length = py.size();
+      fr.header.record_type = Record_type::ROW;
+      fr.payload = py;
+
+      auto v = compute_byte_frame(fr);
+      fr.checksum = compute_checksum_crc32c(v);
+      append_bytes(v, fr.checksum);
+
+      if (!flush_sync_controller(active_fd, v)) {
+        err.set_code(error_codes::RUNTIME_ERROR);
+        err.set_message("Failed to write frame payload to file descriptor.");
+        log_internal("ERROR", err.get_message().value());
+        return false;
+      }
+
+      segment_list.back().last_lsn = next_lsn;
+      segment_list.back().number_of_records++;
 
       next_lsn++;
       active_segment_space++;
-    }
 
-    frame_record fr;
-    fr.header.header_length = config.RECORD_HEADER_SIZE;
-    fr.header.LSN = next_lsn;
-    fr.header.payload_length = py.size();
-    fr.header.record_type = Record_type::ROW;
-    fr.payload = py;
+      if (active_segment_space >= config.MAX_SEG_SIZE) {
+        segment_seal ss_pay{segment_id, next_lsn, active_segment_space};
+        frame_record ss_fr;
+        ss_fr.header.header_length = config.RECORD_HEADER_SIZE;
+        ss_fr.header.LSN = next_lsn;
+        ss_fr.header.payload_length = sizeof(ss_pay);
+        ss_fr.header.record_type = Record_type::SEGMENT_SEAL;
 
-    auto v = compute_byte_frame(fr);
-    fr.checksum = compute_checksum_crc32c(v);
-    append_bytes(v, fr.checksum);
+        auto *seal_ptr = reinterpret_cast<unsigned char *>(&ss_pay);
+        ss_fr.payload.assign(seal_ptr, seal_ptr + sizeof(ss_pay));
 
-    flush_sync_controller(active_fd, v);
+        auto ss_v = compute_byte_frame(ss_fr);
+        ss_fr.checksum = compute_checksum_crc32c(ss_v);
+        append_bytes(ss_v, ss_fr.checksum);
 
-    segment_list.back().last_lsn = next_lsn;
-    segment_list.back().number_of_records++;
+        flush_sync_controller(active_fd, ss_v);
 
-    next_lsn++;
-    active_segment_space++;
+        if (config.ss == sync_strategy::ALWAYS) {
+          if (fsync(active_fd) < 0) {
+            err.set_code(error_codes::SYNC_FAILED);
+            err.set_message("fsync failed during segment seal rollover.");
+            log_internal("ERROR", err.get_message().value());
+            return false;
+          }
+          durable_lsn = next_lsn;
+        }
+        close(active_fd);
 
-    if (active_segment_space >= config.MAX_SEG_SIZE) {
-      segment_seal ss_pay{segment_id, next_lsn, active_segment_space};
-      frame_record ss_fr;
-      ss_fr.header.header_length = config.RECORD_HEADER_SIZE;
-      ss_fr.header.LSN = next_lsn;
-      ss_fr.header.payload_length = sizeof(ss_pay);
-      ss_fr.header.record_type = Record_type::SEGMENT_SEAL;
-
-      auto *seal_ptr = reinterpret_cast<unsigned char *>(&ss_pay);
-      ss_fr.payload.assign(seal_ptr, seal_ptr + sizeof(ss_pay));
-
-      auto ss_v = compute_byte_frame(ss_fr);
-      ss_fr.checksum = compute_checksum_crc32c(ss_v);
-      append_bytes(ss_v, ss_fr.checksum);
-
-      flush_sync_controller(active_fd, ss_v);
-
-      if (config.ss == sync_strategy::ALWAYS) {
-        if (fsync(active_fd) < 0)
-          return false;
-        durable_lsn = next_lsn;
+        current_base_lsn = next_lsn + 1;
+        active_segment_space = 0;
+        active_fd = -1;
+        segment_id++;
+        next_lsn++;
       }
-      close(active_fd);
 
-      current_base_lsn = next_lsn + 1;
-      active_segment_space = 0;
-      active_fd = -1;
-      segment_id++;
-      next_lsn++;
+      tail_cv.notify_all();
+      return true;
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(e.what());
+      log_internal("ERROR", err.get_message().value());
+      return false;
     }
-
-    tail_cv.notify_all();
-    return true;
   }
 
   uint64_t get_next_lsn() const {
@@ -610,8 +797,8 @@ private:
       if (it->last_lsn < min_pin && segment_list.size() > 1) {
         std::error_code ec;
         if (std::filesystem::remove(it->base_file_path, ec)) {
-          std::cout << "[PRUNER] Deleted retention-safe segment: "
-                    << it->base_file_path << "\n";
+          log_internal("INFO",
+                       "Prune worker deleted segment: " + it->base_file_path);
           it = segment_list.erase(it);
           continue;
         }
@@ -641,25 +828,35 @@ public:
     }
   }
 
-  std::optional<WAL::frame_record> next(bool follow_tail = true,
-                                        uint32_t timeout_ms = 1000) {
-    while (true) {
-      auto record = wal_ref->read_record_at_lsn(current_lsn);
-      if (record.has_value()) {
-        current_lsn++;
-        wal_ref->update_reader_lsn(iterator_id, current_lsn);
-        return record;
+  std::optional<WAL::frame_record>
+  next(error_object &err, bool follow_tail = true, uint32_t timeout_ms = 1000) {
+    err.reset();
+    try {
+      while (true) {
+        auto record = wal_ref->read_record_at_lsn(current_lsn, err);
+        if (err.failed())
+          return std::nullopt;
+
+        if (record.has_value()) {
+          current_lsn++;
+          wal_ref->update_reader_lsn(iterator_id, current_lsn);
+          return record;
+        }
+
+        if (!follow_tail)
+          return std::nullopt;
+
+        wal_ref->wait_for_new_data(current_lsn,
+                                   std::chrono::milliseconds(timeout_ms));
+
+        if (wal_ref->get_next_lsn() <= current_lsn) {
+          return std::nullopt;
+        }
       }
-
-      if (!follow_tail)
-        return std::nullopt;
-
-      wal_ref->wait_for_new_data(current_lsn,
-                                 std::chrono::milliseconds(timeout_ms));
-
-      if (wal_ref->get_next_lsn() <= current_lsn) {
-        return std::nullopt;
-      }
+    } catch (const std::exception &e) {
+      err.set_code(error_codes::RUNTIME_ERROR);
+      err.set_message(e.what());
+      return std::nullopt;
     }
   }
 
