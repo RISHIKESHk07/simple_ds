@@ -21,8 +21,6 @@
 #include <unordered_map>
 #include <vector>
 
-// --- ERROR HANDLING & LOGGING INFRASTRUCTURE ---
-
 enum class error_codes {
   NONE,
   RUNTIME_ERROR,
@@ -59,7 +57,7 @@ class FileSink : public ILogger {
 
 public:
   explicit FileSink(const std::string &filename) {
-    log_file.open(filename, std::ios::app);
+    log_file.open(filename, std::ios::out | std::ios::app);
   }
 
   void log(const std::string &level, const std::string &message) override {
@@ -87,7 +85,8 @@ struct WAL_config {
   uint32_t RECORD_HEADER_SIZE = 28;
   uint32_t GROUP_COMMIT_R = 30;
   uint32_t GROUP_COMMIT_T = 60; // ms
-  std::shared_ptr<ILogger> logger = nullptr;
+  std::shared_ptr<ILogger> logger =
+      std::make_shared<FileSink>(base_dir + "/debug.log");
 };
 
 class WAL {
@@ -276,7 +275,9 @@ public:
       if (err.failed())
         return;
 
-      pruning_thread = std::thread([this]() { start_prune_process(); });
+      pruning_thread = std::thread([this]() {
+        // start_prune_process();
+      });
       log_internal("INFO", "WAL engine initialized successfully.");
     } catch (const std::exception &e) {
       err.set_code(error_codes::RUNTIME_ERROR);
@@ -294,21 +295,21 @@ public:
     shutdown(err);
   }
 
-  // --- SHUTDOWN & SEAL FUNCTION ---
-
   bool shutdown(error_object &err) {
     err.reset();
     if (is_shutdown.exchange(true))
       return true;
 
     try {
-      std::lock_guard<std::mutex> lock(wal_mutex);
-
-      prune_var.store(true);
+      {
+        std::lock_guard<std::mutex> lock(prune_mutex);
+        prune_var.store(true);
+      }
       prune_cv.notify_all();
       if (pruning_thread.joinable())
         pruning_thread.join();
 
+      std::lock_guard<std::mutex> lock(wal_mutex);
       if (active_fd >= 0) {
         // Emit Shutdown Seal Payload
         shutdown_payload sp{};
@@ -612,6 +613,7 @@ public:
           break;
         }
       }
+      std::cout << target_path << std::endl;
       if (target_path.empty())
         return std::nullopt;
 
@@ -733,12 +735,16 @@ public:
         append_bytes(ss_v, ss_fr.checksum);
 
         flush_sync_controller(active_fd, ss_v);
+        segment_list.back().last_lsn = next_lsn;
+        segment_list.back().number_of_records++;
 
         if (config.ss == sync_strategy::ALWAYS) {
           if (fsync(active_fd) < 0) {
             err.set_code(error_codes::SYNC_FAILED);
             err.set_message("fsync failed during segment seal rollover.");
             log_internal("ERROR", err.get_message().value());
+            close(active_fd);
+            active_fd = -1;
             return false;
           }
           durable_lsn = next_lsn;
@@ -782,6 +788,7 @@ private:
         prune_cv.wait_for(lock, std::chrono::seconds(10),
                           [this] { return prune_var.load(); });
       }
+
       if (prune_var.load())
         break;
       execute_prune_process();
