@@ -56,6 +56,16 @@ I also came across a research paper by the amazing Sun Yihan that discusses para
 
   Coming to Skip Lists, they are probabilistic data structures that can achieve performance comparable to balanced trees while requiring much simpler algorithms. Instead of maintaining rigid balancing invariants like AVL Trees or Red-Black Trees, Skip Lists rely on randomization to maintain their structure, making them significantly easier to implement. This simplicity is one of the reasons they are commonly used as memtable implementations in key-value stores such as Redis variants and DragonflyDB.Another interesting advantage to skiplists is their concurrency implmentation is also quite easy to work out because , unlike trees the amount of node which we need to lock for consistency is quite less and less contented for , mainly if see the predecessors required in skiplists are spread out , throughout data structure , but incase of trees we will always try to hold locks of parents until the root itself as write amplification can go al the way to root , so when multiple writes occur to the same section (not exactly same point ) their will be alots of contention for locks and retries . These are solved using Masstree implementation for trees which use a optimic locking framework along with tries to make sure concurrency is viable while also maintaing vache coherence of long strings .
 
+* A small note on some extra data structures & some important findings , (we will divide deeper in independent blogs , will leave some simple lines about each) coming to mainly buffered Trees , Bw-Tree , MassTree , Bz-Tree , ART , FB+ Tree , Con Tree
+
+    (a) Buffered Tress : We push all updates through the root of the tree , and every insertion fills up a bucket node , and the moment it overflows it will push existing items in said bucket node , into child bucket nodes , this allows for incredible write speeds but read requires for tracing the path it could have taken , structurally it looks like a lsm tree but its not flat , so we need to traverse some pointers . TokuDB 's fractal Tree was based on this idea , unforuntanetly this project is discontinued due RocksDB dominating the market at the time . Bz-Tree is a updated version which primarily uses PMWCAS 
+    
+    (b) MassTree :  Its a Trie of B+ trees , imagine Trie 's layers consisting of nodes but each node is a self contained B+ Tree , the main advantage we have here is that we can split variable lenght long cache lines into fixed size blocks which are mapped along the Trie , it works best for shared prefix cache items . Its a true aconcurrent data structure , allowing multiple writers and readers with the help of optimistic locking . Finally coming to reads , due to no locking in readers we can have good lookup speed and we use some CAS based operations to make sure everything is atomic . Range queries are the only problem as we need o traverse multiple B+ Tree , which could quite cumbersome to do .
+
+    (c) Bw-Tree: Another obscure type , its a B-Tree concurrent latch free type , instead of data itself we store delta of changes to represent the data , and we have comapction algo whcih over time slowing compacts stuff for space , this will require great amount of memory . In-order to work with all these data items , we actaully map all of them to a table depicting their physical memory slots , any operation manupulating the tree happens through this table , so their can be great contention here . Garbage collectors need to be efficient for making things work smoothly . BzTree is a updated version which uses PMW-CAS   , which allows for working on multiple items in the table mapping at once .
+
+    (d) Con-Tree: In its simplest form its a path-copying based Adaptive Radix Tree or B-Tree , here path copying is a MVCC based technique which updates the path through which we traversing to target by making the prior path as a version when we add new items . This allows for concurrent writers and readers to work on it simentenously , P-Tree also uses this idea .
+
 * Some ideas I want to note down here. In Redis, we typically use an ART or a hash table as the primary in-memory data structure, and persistence is achieved by flushing updates to an Append-Only File (AOF).
 
   The main bottlenecks are:
@@ -78,7 +88,7 @@ I also came across a research paper by the amazing Sun Yihan that discusses para
 
 ## WHAT I WANT AT THE END OF THE DAY!!!
 
-A simple key-value store (hopefully with most Redis features) that makes full use of my hardware, since I cannot afford to build my own cloud infrastructure right now (a far-fetched dream that will probably never happen...).
+A simple key-value store (hopefully with most of Redis features) that makes full use of my hardware, since I cannot afford to build my own cloud infrastructure right now (a far-fetched dream that will probably never happen...).
 
 The long-term goal is to use this project as the foundation for a proper disk-based distributed database system, similar in spirit to Pebble, RocksDB, Cassandra, ScyllaDB, and many others.
 
