@@ -1,3 +1,62 @@
+// ┌─────────────────────────────────────────────────────────────┐
+// │ SSTable Header                                              │
+// │                                                             │
+// │  sstable_id                                                 │
+// │  file_path[128]                                             │
+// │  Identity[128]                                              │
+// │  timestamp                                                  │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Data Block 0                                                │
+// │                                                             │
+// │  ┌───────────────────────────────────────────────────────┐  │
+// │  │ db_row                                                │  │
+// │  │ flags | key_size | value_size | key | value           │  │
+// │  ├───────────────────────────────────────────────────────┤  │
+// │  │ db_row                                                │  │
+// │  │ flags | key_size | value_size | key | value           │  │
+// │  ├───────────────────────────────────────────────────────┤  │
+// │  │ ...                                                   │  │
+// │  ├───────────────────────────────────────────────────────┤  │
+// │  │ row offsets                                           │  │
+// │  ├───────────────────────────────────────────────────────┤  │
+// │  │ db_id                                                 │  │
+// │  │ num_rows                                              │  │
+// │  │ data_bytes                                            │  │
+// │  └───────────────────────────────────────────────────────┘  │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Data Block 1                                                │
+// │ ...                                                         │
+// ├─────────────────────────────────────────────────────────────┤
+// │ ...                                                         │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Data-block metadata                                         │
+// │  block offsets                                              │
+// │ *data start                                                 │
+// │  metadata information                                       │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Index Block                                                 │
+// │                                                             │
+// │  first key of each data block                               │
+// │  key offsets                                                │
+// │ *index start                                                │
+// │  key-offset start                                           │
+// │  number of index entries                                    │
+// ├─────────────────────────────────────────────────────────────┤
+// │ First / Last key metadata                                   │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Bloom Filter                                                 │
+// │ *bloom bits                                                  │
+// │  bloom size                                                  │
+// │  bloom start                                                 │
+// ├─────────────────────────────────────────────────────────────┤
+// │ Footer                                                      │
+// │                                                             │
+// │  data metadata start                                        │
+// │  index metadata start                                       │
+// │  first/last key metadata                                    │
+// │  bloom metadata                                             │
+// └─────────────────────────────────────────────────────────────┘
+
 /*
  LSM engine stores a batch/unit of changes as a sstable , and slowly flushs it
  down to disk , we then call a certain key or item out of the disk . Here we
@@ -12,19 +71,24 @@
  later on .
  */
 
-#pragma once
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <exception>
 #include <fcntl.h>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <sys/stat.h>
-
+#include <thread>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 class LAC {
@@ -35,14 +99,48 @@ public:
 };
 
 class Compactor {
-  Compactor() {
+  // As of now we will be following the incremental compaction strategy , which
+  // is a simple variant of the STCS which also uses some metadata inorder to
+  // control the various issues when we blindy use the above strategies
+  // Implmentation will be kept as decoupled as possible , allowing for future
+  // reuse especially merging process will with sstables as units
+  //
+  // Th main crux here is we will be using a unit of work called fragment which
+  // is our sstable , we will always compact a group of ordered sstables which
+  // is a logical abstraction called a run , when we compact runs and place
+  // their results into subsequent buckets , bucket willl be using file_size as
+  // metrics as its more easier attribute to check if compaction is immediately
+  // needed .
 
-  };
+  Compactor() { std::cout << "Initialised compactor" << std::endl; };
 
-  enum class compact_type { TIERED };
+  enum class compact_type { ICS, NONE };
+  compact_type comp_algo;
+  std::chrono::steady_clock::time_point start_timpestamp;
+  std::chrono::steady_clock::time_point end_timestamp;
+  uint64_t jobs_done = 0;
+  uint64_t jobs_failed = 0;
+  void start_compactor(compact_type &ct) {
+    if (comp_algo != compact_type::NONE)
+      return;
+    comp_algo = ct;
+    start_timpestamp = std::chrono::steady_clock::now();
+  }
 
-  void start_compactor(); // @params: compact_type
-  void merge_sstables();  // @params:  sstable_id_1 , sstable_id_2
+  void set_bucket_info();
+
+  void find_overlaps() {
+
+    // read all required tables 's metadata from above LSM engine
+    // Find overlaps and create groups , by using the sorted metadata
+
+  } // @params: metadata from LSM engine
+
+  void merge_sstables() {
+
+    // merge k sstables here using k-way heaps or tournament tree
+
+  } // @params:  [sstable_id_1 , sstable_id_2 , ..... k items ]
 };
 
 struct LSMEngine_config {
@@ -181,6 +279,39 @@ public:
   void clear() { bloom_bits.assign(filter_size, false); }
 };
 
+struct Run {
+  uint64_t run_id;
+  static inline std::atomic<int> id_counter{1};
+  std::vector<std::string> paths_to_files;
+  uint64_t tombstone_number;
+  uint64_t total_data_rows;
+  uint64_t total_run_size;
+
+  Run() {
+    run_id = id_counter++;
+    tombstone_number = 0;
+    total_run_size = 0;
+    total_data_rows = 0;
+  }
+};
+
+struct Bucket {
+  uint64_t bucket_id;
+  static inline std::atomic<int> id_counter{1};
+  size_t file_size = 0;
+  std::vector<Run *> runs_list;
+  static inline std::atomic<size_t> max_counter{1};
+  size_t threshold_size =
+      1024 * 1024; // constrainst number of runs here , this essential for
+                   // differenitating buckets , 1MB , 10 MB , 100 MB , 1 GB
+
+  Bucket() {
+    bucket_id = id_counter++;
+    threshold_size = max_counter * threshold_size;
+    max_counter = 10 * max_counter;
+  }
+};
+
 class LSMEngine {
 
   LSMEngine(LSMEngine_config &config) : config(config) {
@@ -198,6 +329,8 @@ class LSMEngine {
   uint32_t lookup_table[256];
 
   std::vector<Compactor> compactor_list;
+
+  std::vector<Bucket *> bucket_list;
 
   bloom_filter current_sstable_bloom_filter;
 
@@ -303,30 +436,22 @@ class LSMEngine {
     return crc ^ 0xFFFFFFFF;
   };
 
-#include <type_traits>
-
   template <typename T>
   void append_bytes(std::vector<unsigned char> &bytes, T object) {
 
-    static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>,
-                  "append_bytes only supports unsigned integer types");
+    size_t size = sizeof(T);
 
-    uint64_t value = static_cast<uint64_t>(object);
-
-    for (size_t i = sizeof(T); i > 0; --i) {
+    for (size_t i = size; i > 0; --i) {
 
       size_t shift = 8 * (i - 1);
 
-      bytes.push_back(static_cast<unsigned char>((value >> shift) & 0xFF));
+      bytes.push_back(static_cast<unsigned char>((object >> shift) & 0xFF));
     }
   }
 
   template <typename T>
   bool read_bytes(const std::vector<unsigned char> &bytes, size_t &offset,
                   T &object) {
-
-    static_assert(std::is_integral_v<T> && std::is_unsigned_v<T>,
-                  "read_bytes only supports unsigned integer types");
 
     if (offset + sizeof(T) > bytes.size()) {
       return false;
@@ -338,11 +463,10 @@ class LSMEngine {
 
       value <<= 8;
 
-      value |= static_cast<uint64_t>(bytes[offset + i]);
+      value |= static_cast<T>(bytes[offset + i]);
     }
 
     object = static_cast<T>(value);
-
     offset += sizeof(T);
 
     return true;
@@ -562,24 +686,473 @@ class LSMEngine {
     return true;
   }
 
+  struct Iterator_info {
+    uint64_t id;
+    std::string path_to_file;
+    uint64_t current_pos;
+  };
+
   sstable_metadata_info current_sstable_metadata;
 
   std::vector<uint64_t> data_block_offsets;
 
   std::vector<std::string> first_keys_sstable_list;
 
+  std::mutex readers_lock;
+  std::unordered_map<int, Iterator_info> readers;
+
   int previous_db_id = 0;
 
   int data_block_id = 0;
 
+  Run *active_run = new Run();
+
+  std::condition_variable compact_cv;
+  std::thread compactor_thread;
+
 public:
-  sstable get_key_value();
+  bool register_iterator(uint64_t id_, std::string path_to_file_,
+                         uint64_t cur_Pos) {
+    try {
+      Iterator_info Inf;
+      Inf.id = id_;
+      Inf.path_to_file = path_to_file_;
+      Inf.current_pos = cur_Pos;
+
+      // search path to file once for sanity check here
+      if (std::filesystem::exists(Inf.path_to_file)) {
+        error_state.set_error_code(error_codes::ERROR);
+        error_state.set_message("File does not exist ");
+        return false;
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(readers_lock);
+        readers[Inf.id] = Inf;
+      }
+      return true;
+    } catch (...) {
+      error_state.set_error_code(error_codes::ERROR);
+      error_state.set_message("Internal error");
+      return false;
+    }
+  }
+
+  bool un_register_iterator(uint64_t id_) {
+    error_state.reset();
+    try {
+      size_t bytes_erased;
+      {
+        std::lock_guard<std::mutex> lock(readers_lock);
+        bytes_erased = readers.erase(id_);
+      }
+      if (bytes_erased != 0) {
+        error_state.set_error_code(error_codes::ERROR);
+        error_state.set_message("List was not erased , so item not found ");
+        return false;
+      } else
+        return true;
+    } catch (...) {
+      error_state.set_error_code(error_codes::ERROR);
+      error_state.set_message("Internal error");
+      return false;
+    }
+  }
+
+  bool create_metadata_for_iteratoring(std::string path_to_file,
+                                       uint64_t &data_block_metadata_s,
+                                       uint64_t &index_metadata_start,
+                                       uint64_t &bloom_block_start,
+                                       bloom_filter &bf,
+                                       bool calculate_bloom_flag) {
+    error_state.reset();
+    if (!std::filesystem::exists(path_to_file)) {
+      error_state.set_error_code(error_codes::ERROR);
+      error_state.set_message("File does not exist");
+      return false;
+    }
+
+    std::vector<unsigned char> bytes;
+
+    int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
+
+    if (file_descriptor < 0) {
+      return false;
+    }
+
+    struct stat file_metadata;
+
+    if (fstat(file_descriptor, &file_metadata) == -1) {
+
+      close(file_descriptor);
+      return false;
+    }
+
+    size_t file_end = static_cast<size_t>(file_metadata.st_size);
+    size_t bytes_metadata_sstable_size = 4 * sizeof(uint64_t);
+    off_t new_position =
+        lseek(file_descriptor, bytes_metadata_sstable_size, SEEK_END);
+    if (new_position == 0) {
+      int error_code = errno;
+      error_state.set_error_code(error_codes::ERROR);
+      error_state.set_message("LSEEK issue" + std::to_string(error_code) +
+                              std::strerror(error_code));
+      close(file_descriptor);
+      return false;
+    }
+
+    bytes.resize(bytes_metadata_sstable_size);
+    ssize_t bytes_reads =
+        read(file_descriptor, bytes.data(), bytes_metadata_sstable_size);
+    if (bytes_reads != bytes_metadata_sstable_size) {
+      close(file_descriptor);
+      return false;
+    }
+    uint64_t data_block_metadata_start = 0;
+    uint64_t index_block_start = 0;
+    uint64_t first_last_key_metadata_start = 0;
+    uint64_t bloom_metadata_start = 0;
+
+    size_t read_offset = 0;
+
+    if (!read_bytes(bytes, read_offset, data_block_metadata_start)) {
+      return false;
+    }
+
+    if (!read_bytes(bytes, read_offset, index_block_start)) {
+      return false;
+    }
+
+    if (!read_bytes(bytes, read_offset, first_last_key_metadata_start)) {
+      return false;
+    }
+
+    if (!read_bytes(bytes, read_offset, bloom_metadata_start)) {
+      return false;
+    }
+
+    // clear bytes for reuse , ensuring we never import the sstable into the
+    // memory
+    bytes.clear();
+    read_offset = 0;
+
+    // read bloom filter
+    size_t bloom_metadata_size =
+        bloom_metadata_start - (file_end - bytes_metadata_sstable_size) - 1;
+    bytes.resize(bloom_metadata_size);
+    off_t np2 = lseek(file_descriptor, bloom_metadata_start, SEEK_SET);
+    ssize_t br2 = read(file_descriptor, bytes.data(), bloom_metadata_size);
+    if (br2 == 0) {
+      return false;
+    }
+    uint64_t bloom_filter_size = 0;
+    uint64_t bllom_filter_start = 0;
+    if (!read_bytes(bytes, read_offset, bloom_filter_size)) {
+      return false;
+    }
+    if (!read_bytes(bytes, read_offset, bloom_metadata_start)) {
+      return false;
+    }
+
+    // reading bloom filter payload here
+    bytes.clear();
+    read_offset = 0;
+    bytes.resize(bloom_filter_size);
+    if (calculate_bloom_flag) {
+      off_t np3 = lseek(file_descriptor,
+                        static_cast<size_t>(bloom_metadata_start), SEEK_SET);
+
+      ssize_t br3 = read(file_descriptor, bytes.data(), bloom_filter_size);
+      if (br3 == 0) {
+        return false;
+      }
+
+      bf.set_M_arry(bytes);
+    }
+    data_block_metadata_s = data_block_metadata_start;
+    index_block_start = index_metadata_start;
+    bloom_block_start = bloom_metadata_start;
+
+    close(file_descriptor);
+
+    return true;
+  }
+
+  int search_through_index_block(std::string key, std::string path_to_file) {
+
+    uint64_t dbms = 0;
+    uint64_t ims = 0;
+    uint64_t bbs = 0;
+    bloom_filter bf;
+
+    auto res =
+        create_metadata_for_iteratoring(path_to_file, dbms, ims, bbs, bf, true);
+
+    if (res == false) {
+      return -1;
+    }
+
+    if (!bf.has_key(key))
+      return -1;
+
+    std::vector<unsigned char> bytes;
+    int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
+
+    if (file_descriptor < 0) {
+      return -1;
+    }
+
+    // decode the index block here for a simple binary search for the data_block
+    // index
+    size_t size_index_metadata = 3 * sizeof(uint64_t);
+    size_t read_offset = 0;
+    uint64_t ibs = 0;
+    uint64_t ibo = 0;
+    uint64_t ibn = 0;
+
+    bytes.resize(size_index_metadata);
+    if (!read_bytes(bytes, read_offset, ibs)) {
+      close(file_descriptor);
+      return -1;
+    }
+    if (!read_bytes(bytes, read_offset, ibo)) {
+      close(file_descriptor);
+      return -1;
+    }
+    if (!read_bytes(bytes, read_offset, ibn)) {
+      close(file_descriptor);
+      return -1;
+    }
+    bytes.clear();
+
+    // reading offsets first
+    auto ls = lseek(file_descriptor, ibo, SEEK_SET);
+    std::vector<uint64_t> offsets_;
+    for (int i = 0; i < ibn - 1; i++) {
+      uint64_t temp;
+      size_t temp_size = sizeof(uint64_t);
+      ssize_t br4 = read(file_descriptor, &temp, temp_size);
+      if (br4 == 0) {
+        close(file_descriptor);
+        return -1;
+      }
+      offsets_.push_back(temp);
+    }
+    // reading payload values
+    std::vector<std::string> values_;
+    for (int j = 0; j <= ibn - 2; j++) {
+      std::string temp_str;
+      size_t temp_str_size = offsets_[j + 1] - offsets_[j];
+      ssize_t br_4 = read(file_descriptor, temp_str.data(), temp_str_size);
+      values_.push_back(temp_str);
+    }
+    std::string temp_str;
+    ssize_t br_5 =
+        read(file_descriptor, temp_str.data(), ims - ibo - offsets_.back());
+
+    auto udx = std::lower_bound(values_.begin(), values_.end(), key);
+    int index = udx - values_.begin();
+    // close file entirely
+    close(file_descriptor);
+
+    if (std::strcmp(values_[index].data(), key.data()) > 0) {
+      return -1;
+    }
+    return index;
+  };
+
+  bool read_metadata_data_blocks(
+      std::string path_to_file, uint64_t index_block_start,
+      uint64_t data_block_metadata_start,
+      std::vector<uint64_t> data_block_offsets_from_disk) {
+    int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
+
+    if (file_descriptor < 0) {
+      close(file_descriptor);
+      return -1;
+    }
+
+    std::vector<unsigned char> bytes;
+    if (index_block_start <= data_block_metadata_start) {
+      close(file_descriptor);
+      return false;
+    }
+
+    size_t data_metadata_size =
+        static_cast<size_t>(index_block_start - data_block_metadata_start);
+
+    if (data_metadata_size < 3 * sizeof(uint64_t)) {
+      close(file_descriptor);
+      return false;
+    }
+
+    size_t metadata_field_offset =
+        static_cast<size_t>(index_block_start - 3 * sizeof(uint64_t));
+
+    uint64_t metadata_start_check = 0;
+    uint64_t number_of_data_blocks = 0;
+    uint64_t total_rows = 0;
+
+    size_t temp_offset = 0;
+
+    bytes.resize(metadata_field_offset);
+
+    off_t np5 = lseek(file_descriptor, metadata_field_offset, SEEK_SET);
+    size_t metadata_size_temp = 3 * sizeof(uint64_t);
+    ssize_t br5 = read(file_descriptor, bytes.data(), metadata_size_temp);
+    if (br5 == 0) {
+      close(file_descriptor);
+      return false;
+    }
+
+    if (!read_bytes(bytes, temp_offset, metadata_start_check)) {
+      close(file_descriptor);
+      return false;
+    }
+
+    if (!read_bytes(bytes, temp_offset, number_of_data_blocks)) {
+      close(file_descriptor);
+      return false;
+    }
+
+    if (!read_bytes(bytes, temp_offset, total_rows)) {
+      close(file_descriptor);
+      return false;
+    }
+
+    if (metadata_start_check != data_block_metadata_start) {
+      close(file_descriptor);
+      return false;
+    }
+
+    if (number_of_data_blocks == 0) {
+      close(file_descriptor);
+      return false;
+    }
+    temp_offset = 0;
+    bytes.clear();
+
+    size_t offsets_offset = static_cast<size_t>(data_block_metadata_start);
+    size_t offsets_temp_size = number_of_data_blocks * (sizeof(uint64_t));
+    bytes.resize(offsets_temp_size);
+    off_t np6 = lseek(file_descriptor, offsets_offset, SEEK_SET);
+    ssize_t br6 = read(file_descriptor, bytes.data(), offsets_temp_size);
+    if (br6 == 0) {
+      close(file_descriptor);
+      return false;
+    }
+
+    for (uint64_t i = 0; i < number_of_data_blocks; ++i) {
+
+      uint64_t block_offset = 0;
+
+      if (!read_bytes(bytes, offsets_offset, block_offset)) {
+        close(file_descriptor);
+        return false;
+      }
+
+      data_block_offsets_from_disk.push_back(block_offset);
+    }
+    close(file_descriptor);
+    bytes.clear();
+    return true;
+  }
+
+  std::vector<key_value> read_data_block(std::string path_to_file,
+                                         uint64_t data_block_start,
+                                         uint64_t data_block_end) {
+    std::vector<key_value> kv_pairs;
+    std::vector<unsigned char> bytes;
+    int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
+
+    if (file_descriptor < 0) {
+      close(file_descriptor);
+      return kv_pairs;
+    }
+
+    uint64_t db_end = static_cast<size_t>(data_block_end);
+    size_t db_block_md_temp = 3 * sizeof(uint64_t);
+    off_t np6 = lseek(file_descriptor, db_block_md_temp, SEEK_END);
+    ssize_t br7 = read(file_descriptor, bytes.data(), db_block_md_temp);
+    if (br7 == 0) {
+      close(file_descriptor);
+    }
+    size_t temp_offset = 0;
+    uint64_t metadata_db_id;
+    uint64_t metadata_db_num_rows = 0;
+    uint64_t metadata_db_start_offset = 0;
+
+    if (!read_bytes(bytes, temp_offset, metadata_db_id)) {
+      close(file_descriptor);
+    }
+    if (!read_bytes(bytes, temp_offset, metadata_db_num_rows)) {
+      close(file_descriptor);
+    }
+    if (!read_bytes(bytes, temp_offset, metadata_db_start_offset)) {
+      close(file_descriptor);
+    }
+
+    bytes.clear();
+
+    size_t dn_block_start = static_cast<size_t>(data_block_start);
+    off_t np7 = lseek(file_descriptor, dn_block_start, SEEK_SET);
+
+    for (uint64_t row = 0; row < metadata_db_num_rows; ++row) {
+
+      uint8_t flags = 0;
+      uint64_t key_size = 0;
+      uint64_t value_size = 0;
+
+      size_t row_cursor = 0;
+      size_t db_row_metadata_size = 3 * sizeof(uint64_t);
+      bytes.resize(db_row_metadata_size);
+      ssize_t br8 = read(file_descriptor, bytes.data(), db_row_metadata_size);
+
+      if (!read_bytes(bytes, row_cursor, flags)) {
+      }
+
+      if (!read_bytes(bytes, row_cursor, key_size)) {
+      }
+
+      if (!read_bytes(bytes, row_cursor, value_size)) {
+      }
+      bytes.clear();
+      bytes.resize(key_size + value_size);
+      size_t db_row_kv = static_cast<size_t>(key_size + value_size);
+      ssize_t br9 = read(file_descriptor, bytes.data(), db_row_kv);
+
+      std::string key(reinterpret_cast<const char *>(bytes.data()), key_size);
+
+      row_cursor += key_size;
+
+      std::string value(reinterpret_cast<const char *>(bytes.data() + key_size),
+                        value_size);
+
+      row_cursor += value_size;
+
+      key_value record;
+
+      record.key = std::move(key);
+
+      record.value = std::move(value);
+
+      record.tombstone = (flags & 0x1) != 0;
+
+      kv_pairs.push_back(std::move(record));
+      bytes.clear();
+    }
+
+    return kv_pairs;
+  }
 
   bool append(std::vector<key_value> &records) {
 
     error_state.reset();
 
     try {
+
+      Bucket *ini_bucket = new Bucket();
+      bucket_list.push_back(ini_bucket);
 
       if (records.empty()) {
 
@@ -606,6 +1179,13 @@ public:
         std::string sstable_file_path =
             static_cast<std::string>(config.base_dir) + "/sstable_" +
             std::to_string(current_sstable_id) + ".sst";
+
+        if (active_run->paths_to_files.size() < 4)
+          active_run->paths_to_files.push_back(sstable_file_path);
+        else {
+          bucket_list.back()->runs_list.push_back(active_run);
+          active_run = new Run();
+        }
 
         auto now = std::chrono::system_clock::now().time_since_epoch();
 
@@ -1301,4 +1881,45 @@ public:
      * through the normal memtable -> SSTable path.
      */
   };
+};
+
+class LSM_Iterator {
+
+  LSMEngine *lsm_engine;
+  static inline std::atomic<int> id_counter{1};
+  uint64_t id;
+  std::string path_of_file = "";
+  uint64_t current_position = 0;
+  uint64_t next_position = 0;
+  error_obj ec;
+
+public:
+  LSM_Iterator(LSMEngine *lsme, std::string path)
+      : lsm_engine(lsme), path_of_file(path), id(id_counter++) {
+    std::cout << "LSM Iterator loaded " << std::endl;
+    if (lsm_engine) {
+      lsm_engine->register_iterator(id, path_of_file, 0);
+    }
+  }
+  ~LSM_Iterator() {
+    if (lsm_engine && id) {
+      lsm_engine->un_register_iterator(id);
+    }
+  }
+
+  std::optional<LSM_Iterator> get_iterator() {
+    ec.reset();
+    try {
+      if (path_of_file.size() == 0) {
+        return std::nullopt;
+      }
+      return *this;
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+
+  std::optional<bool> search_for_item() {} //@params: given a <key,value> pair
+
+  void next() {} //@params: none , uses current_pos file iterator
 };

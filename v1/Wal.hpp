@@ -275,9 +275,9 @@ public:
       if (err.failed())
         return;
 
-      pruning_thread = std::thread([this]() {
-        // start_prune_process();
-      });
+      pruning_thread = std::thread([this]() { 
+          //start_prune_process(); 
+        });
       log_internal("INFO", "WAL engine initialized successfully.");
     } catch (const std::exception &e) {
       err.set_code(error_codes::RUNTIME_ERROR);
@@ -687,13 +687,13 @@ public:
         sgi.base_lsn = next_lsn;
         sgi.segment_id = segment_id;
         sgi.base_file_path = seg_path;
-        sgi.last_lsn = next_lsn;
+    sgi.last_lsn = next_lsn;
         sgi.number_of_records = 1;
         segment_list.push_back(sgi);
 
         next_lsn++;
         active_segment_space++;
-      }
+    }
 
       frame_record fr;
       fr.header.header_length = config.RECORD_HEADER_SIZE;
