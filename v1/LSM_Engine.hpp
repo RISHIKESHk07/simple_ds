@@ -71,6 +71,7 @@
  later on .
  */
 
+#include "LSM_Compactor_coordinator.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -96,51 +97,6 @@ class LAC {
 public:
   void get();
   bool set();
-};
-
-class Compactor {
-  // As of now we will be following the incremental compaction strategy , which
-  // is a simple variant of the STCS which also uses some metadata inorder to
-  // control the various issues when we blindy use the above strategies
-  // Implmentation will be kept as decoupled as possible , allowing for future
-  // reuse especially merging process will with sstables as units
-  //
-  // Th main crux here is we will be using a unit of work called fragment which
-  // is our sstable , we will always compact a group of ordered sstables which
-  // is a logical abstraction called a run , when we compact runs and place
-  // their results into subsequent buckets , bucket willl be using file_size as
-  // metrics as its more easier attribute to check if compaction is immediately
-  // needed .
-
-  Compactor() { std::cout << "Initialised compactor" << std::endl; };
-
-  enum class compact_type { ICS, NONE };
-  compact_type comp_algo;
-  std::chrono::steady_clock::time_point start_timpestamp;
-  std::chrono::steady_clock::time_point end_timestamp;
-  uint64_t jobs_done = 0;
-  uint64_t jobs_failed = 0;
-  void start_compactor(compact_type &ct) {
-    if (comp_algo != compact_type::NONE)
-      return;
-    comp_algo = ct;
-    start_timpestamp = std::chrono::steady_clock::now();
-  }
-
-  void set_bucket_info();
-
-  void find_overlaps() {
-
-    // read all required tables 's metadata from above LSM engine
-    // Find overlaps and create groups , by using the sorted metadata
-
-  } // @params: metadata from LSM engine
-
-  void merge_sstables() {
-
-    // merge k sstables here using k-way heaps or tournament tree
-
-  } // @params:  [sstable_id_1 , sstable_id_2 , ..... k items ]
 };
 
 struct LSMEngine_config {
@@ -314,12 +270,23 @@ struct Bucket {
 
 class LSMEngine {
 
-  LSMEngine(LSMEngine_config &config) : config(config) {
+  LSMEngine(LSMEngine_config &config, Compactor_coordinator *cc_)
+      : config(config), cc(cc_) {
     std::cout << "Config loaded" << std::endl;
+    std::cout << "Added a bucket into list" << std::endl;
+    Bucket *ini_bucket = new Bucket();
+    bucket_list.push_back(ini_bucket);
+    // Add a single compactor coordinator here for working with various
+    // compaction threads or stateless workers
+    if (cc->set_active()) {
+      std::cout << "Loaded active comapction coordinator" << std::endl;
+    }
   };
 
   ~LSMEngine() {
-
+    // send shutdown cmd to cc_
+    // clear any backlog work here by flushing completly to a bucket
+    // clear all metadata files
   };
 
   LSMEngine_config config;
@@ -328,7 +295,7 @@ class LSMEngine {
 
   uint32_t lookup_table[256];
 
-  std::vector<Compactor> compactor_list;
+  Compactor_coordinator *cc;
 
   std::vector<Bucket *> bucket_list;
 
@@ -553,20 +520,6 @@ class LSMEngine {
   uint64_t current_sstable_id = 1;
 
   std::vector<sstable_metadata_info> sstable_list;
-
-  bool set_compactor(Compactor &compactor) {
-
-    try {
-
-      compactor_list.push_back(std::move(compactor));
-
-      return true;
-
-    } catch (...) {
-
-      return false;
-    }
-  }
 
   void compute_db_bytes(std::vector<unsigned char> &bytes,
                         std::vector<key_value> &records, int data_block_id,
@@ -1151,9 +1104,6 @@ public:
 
     try {
 
-      Bucket *ini_bucket = new Bucket();
-      bucket_list.push_back(ini_bucket);
-
       if (records.empty()) {
 
         error_state.set_error_code(error_codes::ERROR);
@@ -1501,6 +1451,8 @@ public:
       return false;
     }
   }
+
+  void Recover_metadata_from_dire();
 
   /*
    * Read an SSTable and reconstruct all key/value
@@ -1919,7 +1871,9 @@ public:
     }
   }
 
-  std::optional<bool> search_for_item() {} //@params: given a <key,value> pair
+  std::optional<bool> search_for_item() {
+    return true;
+  } //@params: given a <key,value> pair
 
   void next() {} //@params: none , uses current_pos file iterator
 };
