@@ -70,8 +70,7 @@
  entity as this allows for slatedb inspired feature of distributed compaction
  later on .
  */
-
-#include "LSM_Compactor_coordinator.hpp"
+#pragma once
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -84,6 +83,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <sys/stat.h>
@@ -99,6 +99,78 @@ public:
   bool set();
 };
 
+////////////// importnat metadata shared structs
+
+struct Run {
+  uint64_t run_id;
+  static inline std::atomic<int> id_counter{1};
+  std::vector<std::string> paths_to_files;
+  std::vector<std::string> first_key_run;
+  std::vector<std::string> last_key_run;
+  uint64_t tombstone_number;
+  uint64_t total_data_rows;
+  uint64_t total_run_size;
+
+  Run() {
+    run_id = id_counter++;
+    tombstone_number = 0;
+    total_run_size = 0;
+    total_data_rows = 0;
+  }
+};
+
+struct Bucket {
+  int bucket_id;
+  bool is_compacting = false;
+  std::mutex bm;
+  static inline std::atomic<int> id_counter{1};
+  size_t file_size = 0;
+  std::vector<Run *> runs_list;
+  static inline std::atomic<size_t> max_counter{1};
+  size_t threshold_size =
+      1024 * 1024; // constrainst number of runs here , this essential for
+                   // differenitating buckets , 1MB , 10 MB , 100 MB , 1 GB
+
+  Bucket() {
+    bucket_id = id_counter++;
+    threshold_size = max_counter * threshold_size;
+    max_counter = 10 * max_counter;
+  }
+};
+
+struct sstable_metadata_info {
+
+  std::string file_address;
+
+  std::string first_string_entry;
+
+  std::string last_string_entry;
+
+  uint64_t num_rows_in_sstable;
+
+  uint64_t timestamp;
+
+  sstable_metadata_info() {
+    file_address = "";
+    first_string_entry = "";
+    last_string_entry = "";
+    num_rows_in_sstable = 0;
+    timestamp = 0;
+  }
+};
+
+struct Iterator_info {
+  uint64_t id;
+  std::string path_to_file;
+  uint64_t current_pos;
+};
+////////////////////////////////////
+struct key_value {
+  std::string key;
+  std::string value;
+  bool tombstone = false;
+};
+
 struct LSMEngine_config {
   char Identity[128];
   char base_dir[128];
@@ -108,6 +180,8 @@ struct LSMEngine_config {
 
   uint64_t SIZE_OF_DATABLOCK = 25;
 };
+
+/////////
 
 enum class error_codes { RUNTIME, NONE, ERROR };
 
@@ -235,52 +309,13 @@ public:
   void clear() { bloom_bits.assign(filter_size, false); }
 };
 
-struct Run {
-  uint64_t run_id;
-  static inline std::atomic<int> id_counter{1};
-  std::vector<std::string> paths_to_files;
-  uint64_t tombstone_number;
-  uint64_t total_data_rows;
-  uint64_t total_run_size;
-
-  Run() {
-    run_id = id_counter++;
-    tombstone_number = 0;
-    total_run_size = 0;
-    total_data_rows = 0;
-  }
-};
-
-struct Bucket {
-  uint64_t bucket_id;
-  static inline std::atomic<int> id_counter{1};
-  size_t file_size = 0;
-  std::vector<Run *> runs_list;
-  static inline std::atomic<size_t> max_counter{1};
-  size_t threshold_size =
-      1024 * 1024; // constrainst number of runs here , this essential for
-                   // differenitating buckets , 1MB , 10 MB , 100 MB , 1 GB
-
-  Bucket() {
-    bucket_id = id_counter++;
-    threshold_size = max_counter * threshold_size;
-    max_counter = 10 * max_counter;
-  }
-};
-
 class LSMEngine {
 
-  LSMEngine(LSMEngine_config &config, Compactor_coordinator *cc_)
-      : config(config), cc(cc_) {
+  LSMEngine(LSMEngine_config &config) : config(config) {
     std::cout << "Config loaded" << std::endl;
     std::cout << "Added a bucket into list" << std::endl;
     Bucket *ini_bucket = new Bucket();
     bucket_list.push_back(ini_bucket);
-    // Add a single compactor coordinator here for working with various
-    // compaction threads or stateless workers
-    if (cc->set_active()) {
-      std::cout << "Loaded active comapction coordinator" << std::endl;
-    }
   };
 
   ~LSMEngine() {
@@ -294,8 +329,6 @@ class LSMEngine {
   int active_file_descriptor = -1;
 
   uint32_t lookup_table[256];
-
-  Compactor_coordinator *cc;
 
   std::vector<Bucket *> bucket_list;
 
@@ -439,12 +472,6 @@ class LSMEngine {
     return true;
   }
 
-  struct key_value {
-    std::string key;
-    std::string value;
-    bool tombstone = false;
-  };
-
   sstable read_sstable_from_bytes(std::vector<unsigned char> &bytes) {
 
     sstable file_sstable{};
@@ -491,27 +518,6 @@ class LSMEngine {
 
     return file_sstable;
   }
-
-  struct sstable_metadata_info {
-
-    std::string file_address;
-
-    std::string first_string_entry;
-
-    std::string last_string_entry;
-
-    uint64_t num_rows_in_sstable;
-
-    uint64_t timestamp;
-
-    sstable_metadata_info() {
-      file_address = "";
-      first_string_entry = "";
-      last_string_entry = "";
-      num_rows_in_sstable = 0;
-      timestamp = 0;
-    }
-  };
 
   error_obj error_state;
 
@@ -639,12 +645,6 @@ class LSMEngine {
     return true;
   }
 
-  struct Iterator_info {
-    uint64_t id;
-    std::string path_to_file;
-    uint64_t current_pos;
-  };
-
   sstable_metadata_info current_sstable_metadata;
 
   std::vector<uint64_t> data_block_offsets;
@@ -660,10 +660,17 @@ class LSMEngine {
 
   Run *active_run = new Run();
 
+  std::mutex compact_mutex;
   std::condition_variable compact_cv;
   std::thread compactor_thread;
 
 public:
+  void condition_var_compaction() {
+    {
+      std::unique_lock<std::mutex> lock(compact_mutex);
+      compact_cv.wait(lock);
+    }
+  }
   bool register_iterator(uint64_t id_, std::string path_to_file_,
                          uint64_t cur_Pos) {
     try {
@@ -831,7 +838,8 @@ public:
     return true;
   }
 
-  int search_through_index_block(std::string key, std::string path_to_file) {
+  int search_through_index_block(std::string key, std::string path_to_file,
+                                 int &num_db_block) {
 
     uint64_t dbms = 0;
     uint64_t ims = 0;
@@ -844,9 +852,6 @@ public:
     if (res == false) {
       return -1;
     }
-
-    if (!bf.has_key(key))
-      return -1;
 
     std::vector<unsigned char> bytes;
     int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
@@ -892,16 +897,14 @@ public:
       offsets_.push_back(temp);
     }
     // reading payload values
+    num_db_block = ibn;
     std::vector<std::string> values_;
-    for (int j = 0; j <= ibn - 2; j++) {
+    for (int j = 0; j <= ibn - 1; j++) {
       std::string temp_str;
       size_t temp_str_size = offsets_[j + 1] - offsets_[j];
       ssize_t br_4 = read(file_descriptor, temp_str.data(), temp_str_size);
       values_.push_back(temp_str);
     }
-    std::string temp_str;
-    ssize_t br_5 =
-        read(file_descriptor, temp_str.data(), ims - ibo - offsets_.back());
 
     auto udx = std::lower_bound(values_.begin(), values_.end(), key);
     int index = udx - values_.begin();
@@ -915,9 +918,9 @@ public:
   };
 
   bool read_metadata_data_blocks(
-      std::string path_to_file, uint64_t index_block_start,
-      uint64_t data_block_metadata_start,
-      std::vector<uint64_t> data_block_offsets_from_disk) {
+      std::string &path_to_file, uint64_t &index_block_start,
+      uint64_t &data_block_metadata_start,
+      std::vector<uint64_t> &data_block_offsets_from_disk) {
     int file_descriptor = open(path_to_file.c_str(), O_RDONLY);
 
     if (file_descriptor < 0) {
@@ -1006,6 +1009,7 @@ public:
 
       data_block_offsets_from_disk.push_back(block_offset);
     }
+    data_block_offsets_from_disk.push_back(metadata_start_check);
     close(file_descriptor);
     bytes.clear();
     return true;
@@ -1130,11 +1134,15 @@ public:
             static_cast<std::string>(config.base_dir) + "/sstable_" +
             std::to_string(current_sstable_id) + ".sst";
 
-        if (active_run->paths_to_files.size() < 4)
+        active_run->first_key_run.push_back(records[0].key);
+        active_run->last_key_run.push_back(records.back().key);
+
+        if (active_run->paths_to_files.size() < 4) {
           active_run->paths_to_files.push_back(sstable_file_path);
-        else {
+        } else {
           bucket_list.back()->runs_list.push_back(active_run);
           active_run = new Run();
+          compact_cv.notify_one();
         }
 
         auto now = std::chrono::system_clock::now().time_since_epoch();
@@ -1841,16 +1849,49 @@ class LSM_Iterator {
   static inline std::atomic<int> id_counter{1};
   uint64_t id;
   std::string path_of_file = "";
-  uint64_t current_position = 0;
+  uint64_t current_position =
+      -1; // data_block_indexs current_position , datablock as unit is better
+          // then fetching a literal row , in case of using a single datablocks
+          // items too many times , we could make a small history vector for
+          // holding data_blocks of previous request
   uint64_t next_position = 0;
   error_obj ec;
 
+  uint64_t data_block_metadata_s;
+  uint64_t index_metadata_start;
+  uint64_t bloom_block_start;
+  std::vector<uint64_t> data_block_offsets_from_disk;
+  bloom_filter bf;
+  int num_db_block = 0;
+
 public:
-  LSM_Iterator(LSMEngine *lsme, std::string path)
+  // we using first_key as way to make sure their issues when parsing the
+  // index_block , and ensure the first actually belongs here and by mistake you
+  // did not put a possible wrong key
+  LSM_Iterator(LSMEngine *lsme, std::string path, std::string first_key)
       : lsm_engine(lsme), path_of_file(path), id(id_counter++) {
     std::cout << "LSM Iterator loaded " << std::endl;
     if (lsm_engine) {
       lsm_engine->register_iterator(id, path_of_file, 0);
+      // loading metadata once only here per file
+      if (lsm_engine->create_metadata_for_iteratoring(
+              path_of_file, data_block_metadata_s, index_metadata_start,
+              bloom_block_start, bf, 1)) {
+        auto t = lsm_engine->search_through_index_block(first_key, path_of_file,
+                                                        num_db_block);
+        if (bf.has_key(first_key) && num_db_block > 0 && t != -1) {
+          auto t1 = lsm_engine->read_metadata_data_blocks(
+              path_of_file, index_metadata_start, data_block_metadata_s,
+              data_block_offsets_from_disk);
+        } else {
+          std::cout
+              << "Metadata issue , bloom filter could not detect first key"
+              << std::endl;
+        }
+
+      } else {
+        std::cout << "Metadata issue while loading" << std::endl;
+      }
     }
   }
   ~LSM_Iterator() {
@@ -1871,9 +1912,59 @@ public:
     }
   }
 
-  std::optional<bool> search_for_item() {
-    return true;
-  } //@params: given a <key,value> pair
+  std::optional<std::pair<bool, std::vector<key_value>>>
+  search_for_item_db_block(std::string key) {
+    std::vector<key_value> res;
 
-  void next() {} //@params: none , uses current_pos file iterator
+    if (bf.has_key(key)) {
+      auto t = lsm_engine->search_through_index_block(key, path_of_file,
+                                                      num_db_block);
+      res = lsm_engine->read_data_block(path_of_file,
+                                        data_block_offsets_from_disk[t],
+                                        data_block_offsets_from_disk[t + 1]);
+
+      auto it_t =
+          std::find_if(res.begin(), res.end(),
+                       [&key](const key_value &kv) { return kv.key == key; });
+
+      if (it_t == res.end()) {
+        return std::pair<bool, std::vector<key_value>>(false, res);
+      } else {
+
+        if (t + 1 > num_db_block) {
+          next_position = -1;
+        }
+
+        else
+          next_position = current_position + 1;
+
+        return std::pair<bool, std::vector<key_value>>(true, res);
+      }
+
+    } else {
+      data_block_metadata_s = 0;
+      index_metadata_start = 0;
+      bloom_block_start = 0;
+      bf.clear();
+      return std::pair<bool, std::vector<key_value>>(false, res);
+    }
+  }
+  //@params: given a <key,value> pair
+
+  bool next() {
+    if (next_position == -1) {
+      return false;
+    }
+    if (next_position <= num_db_block) {
+      auto res = lsm_engine->read_data_block(
+          path_of_file, data_block_offsets_from_disk[next_position],
+          data_block_offsets_from_disk[next_position + 1]);
+      current_position = next_position;
+      next_position = current_position + 1;
+      return true;
+    } else {
+      next_position = -1;
+      return false;
+    }
+  } //@params: none , uses current_pos file iterator
 };
