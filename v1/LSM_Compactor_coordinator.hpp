@@ -2,12 +2,23 @@
 #include "./LSM_Engine.hpp"
 #include "./LSM_compactor.hpp"
 #include <algorithm>
+#include <condition_variable>
 #include <cstddef>
+#include <memory>
 #include <queue>
 #include <set>
+// using this data structure for in-machine thread consumption pattern , in case
+// of cross-machine we need adapters over some client and server which will allw
+// it access this
 
 class Compactor_coordinator {
-  enum class Job_status { ERROR, QUEUED, COMPLETED, RETRY };
+  enum class Job_status {
+    ERROR,
+    QUEUED,
+    COMPLETED,
+    RETRY,
+    PRUNED_DUE_SHUTDOWN
+  };
   struct Job {
     int id_;
     int acive_job_id_;
@@ -32,6 +43,7 @@ class Compactor_coordinator {
   std::mutex active_job_mutex;
   std::mutex jobs_mutex;
   std::mutex coordinator_mutex;
+  std::condition_variable coordinator_cv;
   bool active = false;
   std::vector<Compactor *> compactor_list;
   std::queue<Active_Job> active_job_list;
@@ -121,20 +133,14 @@ public:
               }
             }
 
-            // block after assigning int compactor and let compactor wake this
-            // part allowing for this only wake when all jobs of the same
-            // bucket: is done , mark them as completed in active job , then
-            {
-              std::lock_guard<std::mutex> lock(active_job_mutex);
-            }
             continue;
           }
           break;
         }
 
-        // Retry of failed jobs && also incase of another compaction request was
-        // recieved during compaction of current taks we can restart compaction
-        // here by continue .
+        // compactor assigned here , we wait for all current jobs to be assigned
+        // , and done remove the current active job into retry queue or maybe
+        // consider completed
       }
     }
   };
@@ -154,7 +160,7 @@ public:
     std::sort(vec.begin(), vec.end(),
               [](std::pair<std::pair<std::string, std::string>, bool> &a,
                  std::pair<std::pair<std::string, std::string>, bool> &b) {
-                if (a.first.first >= b.first.first)
+                if (a.first.first > b.first.first)
                   return true;
                 return false;
               });
@@ -175,6 +181,7 @@ public:
         active_j.acive_job_id_ = active_id;
         active_j.jbs = Job_status::QUEUED;
         active_j.compaction_set_groups.push_back(active_set);
+        j.push_back(active_j);
         active_set.clear();
       }
     }
@@ -195,15 +202,64 @@ public:
       }
     }
     // distribute work over them as the respond using their blocking mechanism
-    {
+    while (!jobs_list.empty()) {
+      Compactor *active_comp = nullptr;
+      Job jb;
+      {
+        std::unique_lock<std::mutex> lock(coordinator_mutex);
+        coordinator_cv.wait(lock, [&compactor_avaliable] {
+          return (compactor_avaliable.size() > 0);
+        });
+        active_comp = compactor_avaliable.back();
+        active_comp->set_running_state(true);
+        compactor_avaliable.pop_back();
+        lock.unlock();
+      }
+      {
+        std::lock_guard<std::mutex> lock(jobs_mutex);
+        jb = jobs_list.front();
+        jobs_list.pop();
+      }
+
+      stream_data_blocks_using_iterator_per_Job(active_comp, jb);
     }
   }
 
-  void stream_data_blocks_using_iterator_per_Job(Job j) {
+  void stream_data_blocks_using_iterator_per_Job(Compactor *c, Job j) {
     // stream data to compactor but first using iterators to fetch blocks groups
     // , until all iterators are exhausted , each group is forwarded to a
-    // temp_queue which slowly accessed by the compactor , add simple start/end
-    // datablocks for telling compactors are done
+    // temp_queue for threads on same device / shared memory for workers in same
+    // machine / for cross machines we need a message broker to help , add
+    // simple start/end datablocks for telling compactors are done , streaming
+    // how data will require its own recovery process as well for durability
+    auto s = std::make_shared<MessagingQueue<Data_chunk>>();
+    auto r = std::make_shared<MessagingQueue<Response_chunk>>();
+    c->set_message_queues(s, r);
+    int counter_segments_pushed_complete = 0;
+    int number_of_iterators = 0;
+    std::vector<LSM_Iterator *> lsm_iterators;
+    for (auto i : j.compaction_set_groups) {
+      for (auto k : i) {
+        auto temp = new LSM_Iterator(this->lsm, k);
+        lsm_iterators.push_back(temp);
+      }
+    }
+    number_of_iterators = lsm_iterators.size();
+    while (counter_segments_pushed_complete != number_of_iterators) {
+      for (auto k : lsm_iterators) {
+        Data_chunk dc;
+        auto it = k->get_iterator();
+        auto res2 = it->next();
+        if (!res2.first)
+          counter_segments_pushed_complete++;
+
+        dc.kvroup = res2.second;
+        dc.num_rows = res2.second.size();
+        dc.job_id = j.id_;
+        dc.active_job_id = j.acive_job_id_;
+        s->push_data(dc);
+      }
+    }
   }
 
   void shutdown();

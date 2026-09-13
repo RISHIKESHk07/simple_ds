@@ -1868,7 +1868,7 @@ public:
   // we using first_key as way to make sure their issues when parsing the
   // index_block , and ensure the first actually belongs here and by mistake you
   // did not put a possible wrong key
-  LSM_Iterator(LSMEngine *lsme, std::string path, std::string first_key)
+  LSM_Iterator(LSMEngine *lsme, std::string path, std::string first_key = "")
       : lsm_engine(lsme), path_of_file(path), id(id_counter++) {
     std::cout << "LSM Iterator loaded " << std::endl;
     if (lsm_engine) {
@@ -1951,9 +1951,9 @@ public:
   }
   //@params: given a <key,value> pair
 
-  bool next() {
+  std::pair<bool, std::vector<key_value>> next() {
     if (next_position == -1) {
-      return false;
+      return {false, {}};
     }
     if (next_position <= num_db_block) {
       auto res = lsm_engine->read_data_block(
@@ -1961,10 +1961,10 @@ public:
           data_block_offsets_from_disk[next_position + 1]);
       current_position = next_position;
       next_position = current_position + 1;
-      return true;
+      return {true, res};
     } else {
       next_position = -1;
-      return false;
+      return {false, {}};
     }
   } //@params: none , uses current_pos file iterator
 };
